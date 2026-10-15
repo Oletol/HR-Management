@@ -1,4 +1,4 @@
-// Unit 1 «Model of Communication» with the real course.json: import, student answers, teacher checks, screenshots.
+// Unit 1 «Models and Processes of Communication» with the real course.json: import, student answers, teacher checks, screenshots.
 // Run: python3 -m http.server 5055 -d docs &  node tests/u1.e2e.mjs
 import { chromium } from "playwright";
 import { readFileSync, mkdirSync } from "node:fs";
@@ -46,7 +46,7 @@ await t.click('a[href="#tools/content"]');
 await t.waitForSelector("#import-text");
 await t.evaluate((c) => { document.querySelector("#import-text").value = c; }, courseText);
 await t.click("[data-act=import]");
-await t.waitForSelector('td:has-text("Model of Communication")');
+await t.waitForSelector('td:has-text("Models and Processes of Communication")');
 const db = await t.evaluate(() => JSON.parse(localStorage.getItem("mock:db")));
 const pub = JSON.stringify(db["unitContent/u1"]);
 for (const bad of ['"answer"', "Script for Audio", "Daniel Ferreira", "Key:", "Model answer"]) assert.ok(!pub.includes(bad), "public content contains " + bad);
@@ -68,7 +68,7 @@ await s.fill("[name=password]", "pass123");
 await s.fill("[name=group]", "hr-1");
 await s.click("#auth-submit");
 await s.waitForSelector("text=No units are open yet");
-assert.equal(await s.locator(".sb-uh").count(), 9);
+assert.equal(await s.locator(".sb-uh").count(), 5);
 await t.click('a[href="#tools/access"]');
 await t.click("[data-act=toggle-open][data-unit=u1]");
 await s.waitForSelector('.sb-uh[data-unit="u1"][data-can-open="1"]', { timeout: 5000 });
@@ -90,6 +90,10 @@ await s.selectOption(sel("w1", "1"), ans("w1", "1"));
 await s.selectOption(sel("w1", "2"), ans("w1", "2"));
 const wrong3 = ex("w1").items[2].choices.find((c) => c !== ans("w1", "3"));
 await s.selectOption(sel("w1", "3"), wrong3);
+for (const it of ex("w5").items) await s.selectOption(sel("w5", it.id), ans("w5", it.id));
+await s.selectOption(sel("w3", "1"), "candid");
+await s.selectOption(sel("w3", "2"), "candid");
+await s.fill(sel("w7", "1"), "First, encode the message in plain language and choose a better channel.");
 await s.click('.sb-item:has-text("Grammar in Use")');
 await s.fill(sel("g3", "1a"), "was speaking");
 await s.fill(sel("g3", "1b"), "interrupted");
@@ -121,6 +125,11 @@ const check = async (secName, id, expect) => {
 await check("Warm-up", "w1", `2 / ${ex("w1").items.length}`);
 assert.equal(await s.locator(`${sel("w1", "3")}.bad`).count(), 1);
 await s.locator("#ex-w1").screenshot({ path: `${SHOTS}/c1-w1-checked.png` });
+await check("Warm-up", "w5", "8 / 8");
+await check("Warm-up", "w3", "1 / 11");
+await s.locator("#ex-w5").screenshot({ path: `${SHOTS}/c0-w5-checked.png` });
+await s.locator("#ex-w4").screenshot({ path: `${SHOTS}/c0-w4.png` });
+await s.locator("#ex-w7").screenshot({ path: `${SHOTS}/c0-w7.png` });
 await check("Grammar in Use", "g3", `3 / ${ex("g3").items.length}`);
 await s.locator("#ex-g3").screenshot({ path: `${SHOTS}/c2-g3-checked.png` });
 await check("Grammar in Use", "g2", `1 / 15`);
