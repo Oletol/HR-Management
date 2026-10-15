@@ -83,11 +83,14 @@ export function isCorrect(given, key, opts = {}) {
   if (given == null || norm(given) === "") return false;
   const P = !!opts.punct;
   const variants = (Array.isArray(key) ? key : [key]).flatMap(expandKey);
-  // "'d" can mean "had" or "would": try both
-  let gs = [norm(given, P)];
-  for (let i = 0; i < 3 && gs.some((x) => /'d\b/.test(x)); i++)
-    gs = gs.flatMap((x) => (/'d\b/.test(x) ? [x.replace(/'d\b/, " had"), x.replace(/'d\b/, " would")] : [x])).map((x) => x.replace(/\s+/g, " "));
-  const keysN = new Set(variants.map((v) => norm(v, P)));
+  // "'d" can mean "had" or "would": try both, in the answer and in the key
+  const expandD = (list) => {
+    for (let i = 0; i < 3 && list.some((x) => /'d\b/.test(x)); i++)
+      list = list.flatMap((x) => (/'d\b/.test(x) ? [x.replace(/'d\b/, " had"), x.replace(/'d\b/, " would")] : [x])).map((x) => x.replace(/\s+/g, " "));
+    return list;
+  };
+  const gs = expandD([norm(given, P)]);
+  const keysN = new Set(expandD(variants.map((v) => norm(v, P))));
   return gs.some((x) => keysN.has(x));
 }
 

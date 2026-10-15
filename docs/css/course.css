@@ -481,3 +481,10 @@ ol.items select.gap{margin:0 3px}
 .no-translate .nt-card{max-width:460px;background:var(--navy2);border-radius:16px;padding:26px 28px;box-shadow:0 20px 50px rgba(0,0,0,.35)}
 .no-translate h3{color:#fff;font-size:21px;margin:0 0 10px}
 .no-translate p{color:rgba(255,255,255,.85);font-size:15px;margin:0}
+/* spidergram (Speaking, collaborative task) */
+.spider{display:grid;grid-template-columns:1fr 1.2fr 1fr;grid-template-rows:auto auto auto;gap:14px 18px;align-items:center;margin:16px 0 22px;padding:18px;
+ border:1px solid var(--line);border-radius:var(--r);background:var(--paper);box-shadow:var(--sh2);position:relative}
+.spider .sp-c{grid-area:2/2;background:var(--navy);color:#fff;border-radius:14px;padding:16px 18px;text-align:center;font-family:var(--serif);font-size:16.5px;line-height:1.4}
+.spider .sp-i{background:var(--gold3);border:1px solid var(--gold2);border-radius:999px;padding:10px 14px;text-align:center;font-size:15px;font-weight:600;color:var(--navy)}
+.spider .sp-tl{grid-area:1/1}.spider .sp-tr{grid-area:1/3}.spider .sp-ml{grid-area:2/1}.spider .sp-mr{grid-area:2/3}.spider .sp-b{grid-area:3/2}
+@media (max-width:700px){.spider{grid-template-columns:1fr}.spider>*{grid-area:auto!important}.spider .sp-c{order:-1}}

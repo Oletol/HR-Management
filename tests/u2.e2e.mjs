@@ -106,7 +106,7 @@ await t.waitForSelector("#view .tnote");
 await shot(t, "t-warmup", true);
 
 step("Reading, Vocabulary, Grammar");
-for (const [secName, href] of [["Reading", "reading"], ["Vocabulary Practice", "vocabulary"], ["Grammar in Use", "grammar"]]) {
+for (const [secName, href] of [["Reading", "reading"], ["Vocabulary Practice", "vocabulary"], ["Grammar in Use", "grammar"], ["Listening", "listening"], ["Speaking", "speaking"]]) {
   await s.click(`.sb-item[href$="u2/${href}"]`);
   await s.waitForSelector("#content .ex");
   const tx = await s.evaluate(() => document.body.innerText);
@@ -128,7 +128,6 @@ await s.fill(sel("g1", "10"), "didn't help");
 for (const it of ex("g2").items) await s.selectOption(sel("g2", it.id), ans("g2", it.id));
 await s.selectOption(sel("g4", "1"), "would");
 await s.fill(sel("g3", "4"), "didn't understand");
-await s.check(`${sel("g6", "1")}[value=B]`);
 await s.locator("#save-state", { hasText: /Saved|saved/ }).waitFor({ timeout: 5000 });
 const check2 = async (href, id, expect) => {
   await t.click(`.sb-item[href$="u2/${href}"]`);
@@ -147,7 +146,18 @@ await check2("grammar", "g1", "3 / 14");
 await check2("grammar", "g2", "10 / 10");
 await check2("grammar", "g3", "1 / 6");
 await check2("grammar", "g4", "0 / 10");
-await check2("grammar", "g6", "1 / 6");
+assert.equal(await s.locator("#ex-g5, #ex-g6").count(), 0, "Active Voice part removed");
+await s.click('.sb-item[href$="u2/listening"]');
+for (const it of ex("l3").items) await s.selectOption(sel("l3", it.id), ans("l3", it.id));
+await s.fill(sel("l1", "8"), "a hundred and twenty");
+await s.fill(sel("l1", "5"), "five");
+await s.click('.sb-item[href$="u2/speaking"]');
+for (const it of ex("s2").items) await s.selectOption(sel("s2", it.id), ans("s2", it.id));
+await s.locator("#save-state", { hasText: /Saved|saved/ }).waitFor({ timeout: 5000 });
+await check2("listening", "l3", "8 / 8");
+await check2("listening", "l1", "1 / 9");
+await check2("speaking", "s2", "7 / 7");
+await s.locator(".spider").first().screenshot({ path: `${SHOTS}/spider.png` });
 for (const href of ["reading", "grammar"]) { await t.click(`.sb-item[href$="u2/${href}"]`); await t.waitForSelector("#view .tnote"); await shot(t, "t-" + href, true); }
 
 step("Word export: Student's Book and Teacher's Book");
