@@ -1,7 +1,7 @@
 // Speaking: timers with an in-browser voice recorder (from the msupm2 course engine).
 // The recording never leaves the browser: it is kept in memory as a blob, played back here and,
 // if the student wants, saved to their own computer with "Download". Reloading the page clears it.
-import { registerSpeaking, esc } from "./common.js?v=20261015h5";
+import { registerSpeaking, esc } from "./common.js?v=20261015h6";
 
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const SPK = new Map();   // key -> state (survives re-rendering of the page)
@@ -18,14 +18,15 @@ function speakingHTML(t, key) {
       ${sec ? `<button class="btn small" type="button" data-spk-act="start">Start</button><button class="btn small" type="button" data-spk-act="reset">Reset</button>` : ""}
       ${rec ? `<button class="btn small rec" type="button" data-spk-act="rec"><span class="rec-dot"></span><span class="rl">Record</span></button>` : ""}
     </div>
-    ${rec ? `<div class="spk-takes"></div><p class="spk-note">${sec ? "Record also starts the timer. " : ""}Your recording stays in this browser: nobody else hears it, and it disappears when you reload or close the page. Use Download to keep a copy or to send it to your teacher.</p>` : ""}
+    ${rec ? `<div class="spk-live" hidden><span class="rec-dot"></span><span class="spk-rt">REC 00:00</span><span class="spk-meter"><i></i></span><span class="spk-quiet" hidden>No sound – check the microphone</span></div>
+      <div class="spk-takes"></div><p class="spk-note">${sec ? "Record also starts the timer. " : ""}Your recording stays in this browser: nobody else hears it, and it disappears when you reload or close the page. Use Download to keep a copy or to send it to your teacher.</p>` : ""}
   </div>`;
 }
 registerSpeaking(speakingHTML);
 
 function state(el) {
   const key = el.dataset.spk;
-  if (!SPK.has(key)) SPK.set(key, { sec: +el.dataset.sec, left: +el.dataset.sec, running: false, timer: null, rec: null, stream: null, takes: [], err: "" });
+  if (!SPK.has(key)) SPK.set(key, { sec: +el.dataset.sec, left: +el.dataset.sec, running: false, timer: null, rec: null, stream: null, takes: [], err: "", level: 0, t0: 0, loud: false });
   return SPK.get(key);
 }
 const nodesOf = (key) => $$(`.spk[data-spk="${CSS.escape(key)}"]`);
@@ -42,15 +43,25 @@ function syncSpk(el) {
   if (sb) sb.textContent = st.running ? "Pause" : st.left < st.sec && st.left > 0 ? "Continue" : "Start";
   const rb = el.querySelector('[data-spk-act="rec"]');
   if (rb) { rb.classList.toggle("on", !!st.rec); rb.querySelector(".rl").textContent = st.rec ? "Stop recording" : "Record"; }
+  const live = el.querySelector(".spk-live");
+  if (live) {
+    live.hidden = !st.rec;
+    if (st.rec) {
+      live.querySelector(".spk-rt").textContent = "REC " + fmtT(Math.floor((Date.now() - st.t0) / 1000));
+      live.querySelector(".spk-meter i").style.width = Math.min(100, Math.round(st.level * 100)) + "%";
+      live.querySelector(".spk-quiet").hidden = st.loud || Date.now() - st.t0 < 3000;
+    }
+  }
   const box = el.querySelector(".spk-takes");
   if (box) {
     const sig = st.takes.map((t) => t.url).join("|") + st.err;
     if (box.dataset.sig !== sig) {
       box.dataset.sig = sig;
-      box.innerHTML = (st.err ? `<div class="spk-take" style="color:var(--bad)">${esc(st.err)}</div>` : "")
-        + st.takes.map((t, i) => `<div class="spk-take"><span class="tk-n">Take ${i + 1}</span><audio controls src="${t.url}"></audio>
+      box.innerHTML = (st.err ? `<div class="spk-take" style="color:${/^Waiting/.test(st.err) ? "var(--mut)" : "var(--bad)"}">${esc(st.err)}</div>` : "")
+        + st.takes.map((t, i) => `<div class="spk-take"><span class="tk-n">Take ${i + 1}</span><audio controls preload="metadata" src="${t.url}"></audio>
           <span class="muted" style="font-size:12px">${fmtT(Math.round(t.dur))}</span>
           <a href="${t.url}" download="${esc(t.name)}">Download</a></div>`).join("");
+      box.querySelectorAll("audio").forEach(fixDuration);
     }
   }
 }
@@ -93,15 +104,35 @@ async function startRec(key) {
   st.err = "";
   const type = pickType();
   if (type === null || !navigator.mediaDevices?.getUserMedia) { st.err = "This browser cannot record sound. Please try Chrome, Edge, Firefox or Safari."; return; }
+  if (!window.isSecureContext) { st.err = "Recording works only on a secure (https) page."; return; }
   try {
-    st.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const p = await navigator.permissions?.query?.({ name: "microphone" });
+    if (p && p.state === "denied") {
+      st.err = "The browser is not allowed to use the microphone. Click the icon on the left of the address bar and allow the microphone for this site. On a Mac, also check System Settings, Privacy & Security, Microphone: the switch for your browser must be on. Then reload the page.";
+      return;
+    }
+  } catch {}
+  st.err = "Waiting for the microphone… If the browser asks for permission (near the address bar), click Allow.";
+  syncKey(key);
+  try {
+    st.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   } catch (e) {
-    st.err = "The microphone is not available. Allow access to the microphone in the browser (the icon in the address bar) and try again.";
+    const n = e && e.name;
+    st.err = n === "NotAllowedError" || n === "SecurityError"
+      ? "The browser is not allowed to use the microphone. Click the icon on the left of the address bar and allow the microphone for this site. On a Mac, also check System Settings, Privacy & Security, Microphone: the switch for your browser must be on. Then reload the page."
+      : n === "NotFoundError" || n === "OverconstrainedError"
+        ? "No microphone was found. Connect a microphone or headset and try again."
+        : n === "NotReadableError" || n === "AbortError"
+          ? "The microphone is busy or cannot be started. Close other programs that use it (Zoom, Teams, Telegram calls) and try again."
+          : "The microphone could not be started (" + (n || "unknown error") + "). Try another browser: Chrome, Safari, Edge or Firefox.";
     return;
   }
+  st.err = "";
+  startMeter(st, key);
   const rec = new MediaRecorder(st.stream, type ? { mimeType: type } : undefined);
   const chunks = [];
   const t0 = Date.now();
+  st.t0 = t0; st.loud = false;
   rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
   rec.onstop = () => {
     const mime = rec.mimeType || type || "audio/webm";
@@ -109,6 +140,8 @@ async function startRec(key) {
     const ext = /mp4/.test(mime) ? "m4a" : /ogg/.test(mime) ? "ogg" : "webm";
     const url = URL.createObjectURL(blob);
     st.takes.push({ url, dur: (Date.now() - t0) / 1000, name: `speaking-${key}-take${st.takes.length + 1}.${ext}` });
+    if (!blob.size) st.err = "The recording is empty: the microphone sent no sound. Check which microphone the browser uses (the icon in the address bar) and try again.";
+    stopMeter(st);
     st.stream?.getTracks().forEach((t) => t.stop());
     st.stream = null;
     syncKey(key);
@@ -117,6 +150,43 @@ async function startRec(key) {
   st.rec = rec;
   if (st.sec && !st.running) startTimer(key);
 }
+// live input level, so that the student can see that the microphone really hears them
+function startMeter(st, key) {
+  try {
+    actx ??= new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === "suspended") actx.resume();
+    const src = actx.createMediaStreamSource(st.stream);
+    const an = actx.createAnalyser();
+    an.fftSize = 512;
+    src.connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    st.meter = { src, an, iv: setInterval(() => {
+      an.getByteTimeDomainData(buf);
+      let peak = 0;
+      for (const v of buf) peak = Math.max(peak, Math.abs(v - 128) / 128);
+      st.level = st.level * 0.6 + peak * 2.5 * 0.4;
+      if (peak > 0.04) st.loud = true;
+      syncKey(key);
+    }, 120) };
+  } catch { st.meter = null; }
+}
+function stopMeter(st) {
+  if (!st.meter) return;
+  clearInterval(st.meter.iv);
+  try { st.meter.src.disconnect(); } catch {}
+  st.meter = null; st.level = 0;
+}
+// Chrome writes webm files without a duration: the player shows 0:00 until the end. Find the real length.
+function fixDuration(a) {
+  a.addEventListener("loadedmetadata", function f() {
+    if (a.duration === Infinity || isNaN(a.duration)) {
+      a.currentTime = 1e7;
+      a.addEventListener("timeupdate", function g() { a.removeEventListener("timeupdate", g); a.currentTime = 0; }, { once: true });
+    }
+    a.removeEventListener("loadedmetadata", f);
+  });
+}
+
 function stopRec(key) {
   const st = SPK.get(key);
   if (!st?.rec) return;

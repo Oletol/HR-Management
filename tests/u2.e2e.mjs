@@ -179,7 +179,12 @@ await s.click(`${tA} [data-spk-act="start"]`);   // pause
 const tR = '.spk[data-spk="blk-u2-sp-t1-disc"]';
 await s.click(`${tR} [data-spk-act="rec"]`);
 await s.waitForSelector(`${tR} .btn.rec.on`, { timeout: 5000 });
-await s.waitForTimeout(2200);
+await s.waitForTimeout(3500);
+assert.equal(await s.locator(`${tR} .spk-live`).isVisible(), true, "REC line visible");
+const recTime = (await s.textContent(`${tR} .spk-rt`)).trim();
+const meterW = await s.evaluate((q) => document.querySelector(q + " .spk-meter i").style.width, tR);
+console.log("   while recording:", recTime, "meter", meterW, "quiet hint hidden:", await s.locator(`${tR} .spk-quiet`).isHidden());
+await s.locator(tR).screenshot({ path: `${SHOTS}/spk-recording.png` });
 await s.click(`${tR} [data-spk-act="rec"]`);
 await s.waitForSelector(`${tR} .spk-take a[download]`, { timeout: 5000 });
 await s.locator(tR).screenshot({ path: `${SHOTS}/spk-recorded.png` });
