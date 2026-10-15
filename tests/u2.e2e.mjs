@@ -104,6 +104,51 @@ await check("w5", "1 / 8");
 for (const id of ["w2", "w3", "w4", "w5", "w6"]) await s.locator(`#ex-${id}`).screenshot({ path: `${SHOTS}/c-${id}.png` });
 await t.waitForSelector("#view .tnote");
 await shot(t, "t-warmup", true);
+
+step("Reading, Vocabulary, Grammar");
+for (const [secName, href] of [["Reading", "reading"], ["Vocabulary Practice", "vocabulary"], ["Grammar in Use", "grammar"]]) {
+  await s.click(`.sb-item[href$="u2/${href}"]`);
+  await s.waitForSelector("#content .ex");
+  const tx = await s.evaluate(() => document.body.innerText);
+  assert.ok(!/Key:|Teaching notes|Model answer/.test(tx), "key visible in " + secName);
+  assert.ok(!/[\u2190\u2192\u21d2\u00ab\u00bb\u203a\u25b6]/.test(tx), "arrow in " + secName);
+  await shot(s, "p-" + href, true);
+}
+await s.click('.sb-item[href$="u2/reading"]');
+for (const it of ex("r1").items) await s.selectOption(sel("r1", it.id), ans("r1", it.id));
+await s.fill(sel("r4", "2"), "handful");
+await s.fill(sel("r4", "1"), "stopped");
+await s.click('.sb-item[href$="u2/vocabulary"]');
+for (const it of ex("v3").items) await s.selectOption(sel("v3", it.id), ans("v3", it.id));
+await s.fill(sel("v2", "3"), "talks down to");
+await s.click('.sb-item[href$="u2/grammar"]');
+await s.fill(sel("g1", "4"), "was still looking");
+await s.fill(sel("g1", "9"), "was always interrupting");
+await s.fill(sel("g1", "10"), "didn't help");
+for (const it of ex("g2").items) await s.selectOption(sel("g2", it.id), ans("g2", it.id));
+await s.selectOption(sel("g4", "1"), "would");
+await s.fill(sel("g3", "4"), "didn't understand");
+await s.check(`${sel("g6", "1")}[value=B]`);
+await s.locator("#save-state", { hasText: /Saved|saved/ }).waitFor({ timeout: 5000 });
+const check2 = async (href, id, expect) => {
+  await t.click(`.sb-item[href$="u2/${href}"]`);
+  await t.waitForSelector(`[data-act="check-ex"][data-ex="${id}"]`);
+  await t.click(`[data-act="check-ex"][data-ex="${id}"]`);
+  await s.click(`.sb-item[href$="u2/${href}"]`);
+  await s.waitForSelector(`#ex-${id} .ex-score`, { timeout: 5000 });
+  assert.equal((await s.textContent(`#ex-${id} .ex-score`)).trim(), expect, id);
+  await s.locator(`#ex-${id}`).screenshot({ path: `${SHOTS}/c-${id}.png` });
+};
+await check2("reading", "r1", "5 / 5");
+await check2("reading", "r4", "1 / 8");
+await check2("vocabulary", "v3", "9 / 9");
+await check2("vocabulary", "v2", "1 / 10");
+await check2("grammar", "g1", "3 / 14");
+await check2("grammar", "g2", "10 / 10");
+await check2("grammar", "g3", "1 / 6");
+await check2("grammar", "g4", "0 / 10");
+await check2("grammar", "g6", "1 / 6");
+for (const href of ["reading", "grammar"]) { await t.click(`.sb-item[href$="u2/${href}"]`); await t.waitForSelector("#view .tnote"); await shot(t, "t-" + href, true); }
 assert.deepEqual(errors, [], "page errors");
 console.log("\nALL STEPS PASSED");
 await browser.close();
