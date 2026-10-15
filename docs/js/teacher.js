@@ -4,14 +4,14 @@ import {
   auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, orderBy,
   writeBatch, arrayUnion, arrayRemove, serverTimestamp,
-} from "./fb.js?v=20261015h2";
-import { COURSE_TITLE } from "./firebase-config.js?v=20261015h2";
+} from "./fb.js?v=20261015h3";
+import { COURSE_TITLE } from "./firebase-config.js?v=20261015h3";
 import {
   esc, renderBlocks, renderExercise, exercisesOf, isAuto, gradeAuto, buildResult, keyText, norm,
   fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, KIND_LABEL, isTeacherChecked, gradeExercise, wireFlashcards, isManual,
-} from "./common.js?v=20261015h2";
-import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261015h2";
-import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, feedbackHTML, sleep } from "./writing.js?v=20261015h2";
+} from "./common.js?v=20261015h3";
+import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261015h3";
+import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, feedbackHTML, sleep } from "./writing.js?v=20261015h3";
 
 const $ = (s) => document.querySelector(s);
 const ls = {
@@ -222,7 +222,7 @@ function viewUnit(r) {
   const blocks = [...sec.blocks];
   for (const note of [...(d.notes[sec.id] || [])].reverse()) blocks.splice(note.at, 0, { type: "teacher-note", html: note.html });
   const prev = secs[i - 1], next = secs[i + 1];
-  return bar + pageHead(`Unit ${n} &middot; ${n}.${i + 1}`, esc(sec.title), esc(meta.subtitle || sec.subtitle || ""))
+  return bar + docxBar(u) + pageHead(`Unit ${n} &middot; ${n}.${i + 1}`, esc(sec.title), esc(meta.subtitle || sec.subtitle || ""))
     + renderBlocks(blocks, (ex) => ({
       key: d.keys[ex.id] || {}, readOnly: true,
       tag: ex.check === "teacher" ? (isManual(ex) ? "Writing check by the teacher" : "Checked by the teacher") : "",
@@ -232,6 +232,31 @@ function viewUnit(r) {
       ${prev ? `<a class="pg" href="#${u.id}/${prev.id}"><span class="d">Previous</span><span class="t">${n}.${i} ${esc(prev.title)}</span></a>` : ""}
       ${next ? `<a class="pg next" href="#${u.id}/${next.id}"><span class="d">Next</span><span class="t">${n}.${i + 2} ${esc(next.title)}</span></a>` : ""}
     </nav>`;
+}
+
+// Download the whole unit as a Word file (no interactive elements): Student's Book or Teacher's Book with keys
+function docxBar(u) {
+  return `<div class="dl-bar"><span>Download Unit ${esc(unitNum(u))} as Word:</span>
+    <button class="btn small" data-act="docx" data-unit="${esc(u.id)}" data-ver="student">Student's Book (.docx)</button>
+    <button class="btn small" data-act="docx" data-unit="${esc(u.id)}" data-ver="teacher">Teacher's Book (.docx)</button></div>`;
+}
+async function downloadDocx(unitId, ver, btn) {
+  const u = T.units.find((x) => x.id === unitId);
+  if (!u) return;
+  const old = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = "Preparing…"; }
+  try {
+    const d = await loadUnitData(unitId);
+    if (!d?.content) throw new Error("This unit has no content yet.");
+    const { exportUnitDocx, saveBlob } = await import("./export-docx.js?v=20261015h3");
+    const teacher = ver === "teacher";
+    const sections = d.content.sections.map((s) => ({ ...s, subtitle: (u.sections || []).find((m) => m.id === s.id)?.subtitle || s.subtitle || "" }));
+    const blob = await exportUnitDocx({ courseTitle: COURSE_TITLE, unitNum: unitNum(u), unitTitle: u.title, sections,
+      keys: teacher ? d.keys : {}, notes: teacher ? d.notes : {}, teacher });
+    const safe = (t) => String(t).replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    saveBlob(blob, `${safe(COURSE_TITLE)}_Unit-${unitNum(u)}_${teacher ? "Teachers-Book" : "Students-Book"}.docx`);
+  } catch (e) { console.error(e); toast("Could not create the Word file: " + (e.message || e), 6000); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = old; } }
 }
 
 // Exercises marked "check": "teacher" are checked one at a time, when the teacher decides
@@ -382,6 +407,7 @@ document.addEventListener("click", (e) => {
       await updateDoc(doc(db, "groups", T.gid), { openUnits: open ? arrayRemove(u) : arrayUnion(u) });
     }),
     "release": () => releaseUnit(T.gid, u),
+    "docx": () => downloadDocx(u, b.dataset.ver, b),
     "check-ex": () => checkExercise(T.gid, u, b.dataset.ex),
     "check-writing": () => checkWriting(T.gid, u, b.dataset.ex),
     "hide-writing": () => guard(async () => updateDoc(doc(db, "groups", T.gid), { [`feedbackEx.${u}`]: arrayRemove(b.dataset.ex) })),
@@ -623,7 +649,9 @@ function viewContent() {
   const rows = T.units.map((u) => `<tr>
     <td class="num">${esc(u.order)}</td><td><code>${esc(u.id)}</code></td><td>${u.status === "soon" ? esc(u.title) : `<a href="#${esc(u.id)}">${esc(u.title)}</a>`}</td>
     <td>${u.status === "soon" ? `<span class="pill off">coming soon</span>` : `<span class="pill on">${(u.sections || []).length} sections</span>`}</td>
-    <td><button class="btn small danger" data-act="delete-unit" data-unit="${esc(u.id)}">Delete</button></td></tr>`).join("");
+    <td>${u.status === "soon" ? "" : `<button class="btn small" data-act="docx" data-unit="${esc(u.id)}" data-ver="student" title="Student's Book in Word">Student .docx</button>
+      <button class="btn small" data-act="docx" data-unit="${esc(u.id)}" data-ver="teacher" title="Teacher's Book in Word, with keys and notes">Teacher .docx</button>`}
+      <button class="btn small danger" data-act="delete-unit" data-unit="${esc(u.id)}">Delete</button></td></tr>`).join("");
   return pageHead("Teaching tools", "Course content", "Units are imported from a JSON file that you keep on your computer.") + `
   <div class="box">
     <h3 style="margin-top:0">Import units from JSON</h3>

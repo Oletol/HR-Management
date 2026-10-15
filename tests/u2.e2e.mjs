@@ -15,7 +15,7 @@ const ex = (id) => u1.sections.flatMap((s) => s.blocks).find((b) => b.id === id)
 const ans = (id, it) => { const a = ex(id).items.find((x) => x.id === it).answer; return Array.isArray(a) ? a[0] : a; };
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome" }).catch(() => chromium.launch());
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
 await ctx.route("**/js/fb.js*", (r) => r.fulfill({ contentType: "text/javascript", body: mock }));
 await ctx.route("https://rutube.ru/**", (r) => r.fulfill({ contentType: "text/html", body: "<body style='background:#222;color:#fff;font:20px sans-serif;display:grid;place-items:center'>Rutube player</body>" }));
 const errors = [];
@@ -149,6 +149,29 @@ await check2("grammar", "g3", "1 / 6");
 await check2("grammar", "g4", "0 / 10");
 await check2("grammar", "g6", "1 / 6");
 for (const href of ["reading", "grammar"]) { await t.click(`.sb-item[href$="u2/${href}"]`); await t.waitForSelector("#view .tnote"); await shot(t, "t-" + href, true); }
+
+step("Word export: Student's Book and Teacher's Book");
+const { execSync } = await import("node:child_process");
+await t.click('.sb-item[href$="u2/reading"]');
+await t.waitForSelector('[data-act="docx"][data-ver="student"]');
+for (const ver of ["student", "teacher"]) {
+  const [dl] = await Promise.all([t.waitForEvent("download", { timeout: 30000 }), t.click(`[data-act="docx"][data-ver="${ver}"]`)]);
+  const file = `${SHOTS}/${ver}.docx`;
+  await dl.saveAs(file);
+  const xml = execSync(`unzip -p ${file} word/document.xml`).toString();
+  const txt = xml.replace(/<[^>]+>/g, "");
+  console.log("  ", ver, dl.suggestedFilename(), Math.round(xml.length / 1024) + " KB xml");
+  assert.ok(txt.includes("Two presentations, one reform"), "text present");
+  assert.ok(txt.includes("Background and events in a story"), "grammar present");
+  const hasKey = txt.includes("was explaining") && txt.includes("Teaching notes") && txt.includes("Model answers");
+  assert.equal(hasKey, ver === "teacher", "keys only in the teacher's book");
+}
+
+step("Translation guard on the student page");
+await s.evaluate(() => { document.getElementById("tr-probe").textContent = "Пожалуйста, изучайте этот учебник на английском."; });
+await s.waitForSelector(".no-translate", { timeout: 4000 });
+await shot(s, "x-translate-blocked");
+assert.equal(await t.locator(".no-translate").count(), 0, "teacher page is not blocked");
 assert.deepEqual(errors, [], "page errors");
 console.log("\nALL STEPS PASSED");
 await browser.close();

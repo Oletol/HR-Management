@@ -4,14 +4,14 @@ import {
   auth, db, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
   sendPasswordResetEmail, signOut, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, orderBy,
   serverTimestamp,
-} from "./fb.js?v=20261015h2";
-import { COURSE_TITLE } from "./firebase-config.js?v=20261015h2";
+} from "./fb.js?v=20261015h3";
+import { COURSE_TITLE } from "./firebase-config.js?v=20261015h3";
 import {
   esc, renderBlocks, readInput, fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, exercisesOf, isAuto,
   isTeacherChecked, wireFlashcards, countWords,
-} from "./common.js?v=20261015h2";
-import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261015h2";
-import { feedbackHTML } from "./writing.js?v=20261015h2";
+} from "./common.js?v=20261015h3";
+import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261015h3";
+import { feedbackHTML } from "./writing.js?v=20261015h3";
 
 const $ = (s) => document.querySelector(s);
 const S = {
@@ -578,3 +578,37 @@ async function submitTest(key, ask) {
   submitting = false;
   renderMain();
 }
+
+// ------------------------------------------------------------------ the book cannot be translated by the browser
+// The page asks browsers not to translate it (translate="no", meta google notranslate). A hidden probe sentence is left
+// translatable on purpose: if any translator (Chrome, Yandex, Edge, Safari) changes it, the book is hidden until the
+// student switches the translation off and reloads the page.
+function guardTranslation() {
+  const probe = document.getElementById("tr-probe");
+  if (!probe) return;
+  const ORIGINAL = probe.textContent;
+  const html = document.documentElement;
+  let shown = false;
+  const translated = () =>
+    probe.textContent !== ORIGINAL || probe.querySelector("font") ||
+    /\btranslated-(ltr|rtl)\b/.test(html.className) || (html.lang && !/^en\b/i.test(html.lang));
+  const block = () => {
+    if (shown || !translated()) return;
+    shown = true;
+    const app = document.getElementById("app");
+    if (app) app.style.visibility = "hidden";
+    const el = document.createElement("div");
+    el.className = "no-translate";
+    el.setAttribute("translate", "no");
+    el.innerHTML = `<div class="nt-card"><h3>Translation is turned off</h3>
+      <p>This course book must be read in English. Please switch off the translation in your browser (choose <b>Show original</b>),
+      then reload the page.</p></div>`;
+    document.body.appendChild(el);
+  };
+  const mo = new MutationObserver(block);
+  mo.observe(probe, { childList: true, characterData: true, subtree: true });
+  mo.observe(html, { attributes: true, attributeFilter: ["class", "lang"] });
+  setInterval(block, 2000);
+  block();
+}
+guardTranslation();
