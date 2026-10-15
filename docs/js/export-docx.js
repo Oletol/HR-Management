@@ -257,6 +257,11 @@ function mediaBlocks(b) {
   const file = (s) => String(s || "").split("/").pop();
   if (b.type === "audio") return [para([new TextRun({ text: "Audio · ", bold: true, color: COLORS.teal }), new TextRun({ text: `${b.title || ""}` }),
     new TextRun({ text: `  (${file(b.src)})`, color: COLORS.mut })])];
+  if (b.type === "speaking") {
+    const s = Number(b.sec || 0);
+    return [para([new TextRun({ text: "Speaking · ", bold: true, color: COLORS.teal }), new TextRun({ text: b.label || "Your turn" }),
+      ...(s ? [new TextRun({ text: `  (${Math.floor(s / 60) ? Math.floor(s / 60) + " min " : ""}${s % 60 ? (s % 60) + " sec" : ""})`.replace(" )", ")"), color: COLORS.mut })] : [])])];
+  }
   if (b.type === "video") return [para([new TextRun({ text: "Video · ", bold: true, color: COLORS.teal }), new TextRun({ text: (b.title || "") + "  " }),
     ...(b.url ? [new ExternalHyperlink({ link: b.url, children: [new TextRun({ text: b.url, style: "Hyperlink" })] })] : [])])];
   const pics = b.type === "images" ? b.items || [] : [b];
@@ -282,7 +287,7 @@ export async function exportUnitDocx({ courseTitle, unitNum, unitTitle, sections
       else if (b.type === "teacher-note") { if (teacher) body.push(...boxed(htmlBlocks(b.html), COLORS.tnote, "Teaching notes", COLORS.plum)); }
       else if (b.type === "flashcards") { if (b.numbered) n += 1; body.push(...flashcardBlocks(b, b.numbered ? `${unitNum}.${si + 1}.${n}` : "")); }
       else if (b.type === "exercise") { n += 1; body.push(...exerciseBlocks(b, `${unitNum}.${si + 1}.${n}`, keys[b.id], teacher)); }
-      else if (["audio", "video", "image", "images"].includes(b.type)) body.push(...mediaBlocks(b));
+      else if (["audio", "video", "image", "images", "speaking"].includes(b.type)) body.push(...mediaBlocks(b));
     }
   });
 

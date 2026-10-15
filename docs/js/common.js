@@ -173,6 +173,7 @@ export function renderBlocks(blocks, exOpts, numPrefix = "") {
     if (b.type === "images") return renderImages(b.items || [], b.layout || "grid");
     if (b.type === "audio") return renderAudio(b);
     if (b.type === "video") return renderVideo(b);
+    if (b.type === "speaking") return `<div class="block-spk">${speakingHTML(b, "blk-" + (b.id || hashStr(JSON.stringify(b))))}</div>`;
     if (b.type === "exercise") { n += 1; return renderExercise(b, { num: numPrefix ? `${numPrefix}.${n}` : String(n), ...exOpts(b) }); }
     return "";
   }).join("\n");
@@ -445,6 +446,12 @@ function renderImages(items, layout) {
     </figure>`).join("");
   return `<div class="pics ${items.length > 1 ? (layout === "row" ? "row" : "grid") : "one"}">${figs}</div>`;
 }
+// speaking timers with a voice recorder: drawn by speaking.js (registered there)
+let speakingImpl = () => "";
+export function registerSpeaking(fn) { speakingImpl = fn; }
+const speakingHTML = (t, key) => speakingImpl(t, key);
+export function hashStr(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) | 0; return (h >>> 0).toString(36); }
+
 // video from Rutube (or another site that allows embedding): b.src = embed address, b.url = page to open if the player does not load
 function renderVideo(b) {
   const src = String(b.src || "");

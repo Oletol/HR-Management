@@ -14,8 +14,9 @@ const u1 = course.units.find((u) => u.id === "u2");
 const ex = (id) => u1.sections.flatMap((s) => s.blocks).find((b) => b.id === id);
 const ans = (id, it) => { const a = ex(id).items.find((x) => x.id === it).answer; return Array.isArray(a) ? a[0] : a; };
 
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome" }).catch(() => chromium.launch());
-const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true });
+const ARGS = ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"];
+const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", args: ARGS }).catch(() => chromium.launch({ args: ARGS }));
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, acceptDownloads: true, permissions: ["microphone"] });
 await ctx.route("**/js/fb.js*", (r) => r.fulfill({ contentType: "text/javascript", body: mock }));
 await ctx.route("https://rutube.ru/**", (r) => r.fulfill({ contentType: "text/html", body: "<body style='background:#222;color:#fff;font:20px sans-serif;display:grid;place-items:center'>Rutube player</body>" }));
 const errors = [];
@@ -106,7 +107,7 @@ await t.waitForSelector("#view .tnote");
 await shot(t, "t-warmup", true);
 
 step("Reading, Vocabulary, Grammar");
-for (const [secName, href] of [["Reading", "reading"], ["Vocabulary Practice", "vocabulary"], ["Grammar in Use", "grammar"], ["Listening", "listening"], ["Speaking", "speaking"]]) {
+for (const [secName, href] of [["Reading", "reading"], ["Vocabulary Practice", "vocabulary"], ["Grammar in Use", "grammar"], ["Listening", "listening"], ["Speaking", "speaking"], ["Supplementary Reading", "supplementary"]]) {
   await s.click(`.sb-item[href$="u2/${href}"]`);
   await s.waitForSelector("#content .ex");
   const tx = await s.evaluate(() => document.body.innerText);
@@ -157,8 +158,33 @@ await s.locator("#save-state", { hasText: /Saved|saved/ }).waitFor({ timeout: 50
 await check2("listening", "l3", "8 / 8");
 await check2("listening", "l1", "1 / 9");
 await check2("speaking", "s2", "7 / 7");
-await s.locator(".spider").first().screenshot({ path: `${SHOTS}/spider.png` });
+await s.click('.sb-item[href$="u2/supplementary"]');
+for (const it of ex("x6").items) await s.selectOption(sel("x6", it.id), ans("x6", it.id));
+await s.fill(sel("x4", "3"), "hardly");
+await s.locator("#save-state", { hasText: /Saved|saved/ }).waitFor({ timeout: 5000 });
+await check2("supplementary", "x6", "6 / 6");
+await check2("supplementary", "x4", "1 / 7");
 for (const href of ["reading", "grammar"]) { await t.click(`.sb-item[href$="u2/${href}"]`); await t.waitForSelector("#view .tnote"); await shot(t, "t-" + href, true); }
+
+step("Speaking timers and voice recorder");
+await s.click('.sb-item[href$="u2/speaking"]');
+const tA = '.spk[data-spk="blk-u2-sp-a-short"]';
+await s.waitForSelector(tA);
+assert.equal((await s.textContent(`${tA} .spk-time`)).trim(), "00:30");
+await s.click(`${tA} [data-spk-act="start"]`);
+await s.waitForTimeout(2300);
+const left = (await s.textContent(`${tA} .spk-time`)).trim();
+assert.ok(left === "00:28" || left === "00:27", "timer runs: " + left);
+await s.click(`${tA} [data-spk-act="start"]`);   // pause
+const tR = '.spk[data-spk="blk-u2-sp-t1-disc"]';
+await s.click(`${tR} [data-spk-act="rec"]`);
+await s.waitForSelector(`${tR} .btn.rec.on`, { timeout: 5000 });
+await s.waitForTimeout(2200);
+await s.click(`${tR} [data-spk-act="rec"]`);
+await s.waitForSelector(`${tR} .spk-take a[download]`, { timeout: 5000 });
+await s.locator(tR).screenshot({ path: `${SHOTS}/spk-recorded.png` });
+const [rdl] = await Promise.all([s.waitForEvent("download"), s.click(`${tR} .spk-take a[download]`)]);
+console.log("   recording downloaded:", rdl.suggestedFilename());
 
 step("Word export: Student's Book and Teacher's Book");
 const { execSync } = await import("node:child_process");

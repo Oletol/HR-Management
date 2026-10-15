@@ -488,3 +488,29 @@ ol.items select.gap{margin:0 3px}
 .spider .sp-i{background:var(--gold3);border:1px solid var(--gold2);border-radius:999px;padding:10px 14px;text-align:center;font-size:15px;font-weight:600;color:var(--navy)}
 .spider .sp-tl{grid-area:1/1}.spider .sp-tr{grid-area:1/3}.spider .sp-ml{grid-area:2/1}.spider .sp-mr{grid-area:2/3}.spider .sp-b{grid-area:3/2}
 @media (max-width:700px){.spider{grid-template-columns:1fr}.spider>*{grid-area:auto!important}.spider .sp-c{order:-1}}
+
+/* ---------------- speaking: timer and voice recorder ---------------- */
+.spk{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center;margin:14px 18px 16px;padding:12px 14px;
+ border:1px solid var(--gold2);background:var(--gold3);border-radius:var(--r2)}
+.block-spk .spk{margin:18px 0}
+.spk-lab{flex:1 1 100%;font-size:13.5px;font-weight:650;color:var(--ink2)}
+.spk-time{font-family:var(--mono);font-size:24px;font-weight:700;color:var(--ink);min-width:4.2ch;font-variant-numeric:tabular-nums}
+.spk.run .spk-time{color:var(--teal)}
+.spk.end .spk-time{color:var(--bad)}
+.spk-ring{width:34px;height:34px;flex:none}
+.spk-ring circle{fill:none;stroke-width:4}
+.spk-ring .bgc{stroke:var(--line)}
+.spk-ring .fgc{stroke:var(--teal);stroke-linecap:round;transform:rotate(-90deg);transform-origin:50% 50%;transition:stroke-dashoffset .9s linear}
+.spk.end .spk-ring .fgc{stroke:var(--bad)}
+.spk-btns{display:flex;gap:6px;flex-wrap:wrap}
+.spk .btn.rec{border-color:var(--bad);color:var(--bad)}
+.spk .btn.rec.on{background:var(--bad);color:#fff}
+.rec-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:currentColor;margin-right:6px;vertical-align:0}
+.spk .btn.rec.on .rec-dot{animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.25}}
+.spk-takes{flex:1 1 100%;display:grid;gap:6px}
+.spk-take{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+.spk-take .tk-n{font-size:12.5px;font-weight:700;color:var(--ink2);min-width:4.5em}
+.spk-take audio{height:34px;flex:1;min-width:200px;max-width:420px}
+.spk-take a{font-size:12.5px}
+.spk-note{flex:1 1 100%;font-size:12px;color:var(--mut);margin:0}
