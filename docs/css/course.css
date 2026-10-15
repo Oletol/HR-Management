@@ -463,3 +463,13 @@ select.gap{cursor:pointer}
 ol.items select.gap{margin:0 3px}
 .keyhint.model{display:block;margin:6px 0 4px;padding:6px 10px;line-height:1.5;font-weight:400;color:var(--ink2);background:#eff8f2}
 .keyhint.model b{color:var(--ok)}
+
+/* video (Rutube embed) */
+.video{border:1px solid var(--line);border-radius:var(--r);background:var(--paper);box-shadow:var(--sh2);padding:14px 16px;margin:18px 0}
+.video .vid-t{font-family:var(--serif);font-weight:700;font-size:17px;color:var(--navy);margin:0 0 10px}
+.video .vid-box{position:relative;aspect-ratio:16/9;border-radius:var(--r2);overflow:hidden;background:#000}
+.video .vid-box iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.video .vid-n{font-size:13.5px;color:var(--mut);margin-top:8px}
+/* sentences with several gaps written as an inline list */
+.inline-text ol.items{padding-left:22px}
+.inline-text ol.items li{margin-bottom:9px}

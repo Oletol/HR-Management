@@ -8,12 +8,13 @@ export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
 // регистр, апострофы, пробелы, знаки препинания и сокращения (don't = do not) не важны
 const CONTR = [[/\bcan't\b|\bcan not\b/g, "cannot"], [/\bwon't\b/g, "will not"], [/\bshan't\b/g, "shall not"],
   [/n't\b/g, " not"], [/'m\b/g, " am"], [/'re\b/g, " are"], [/'ve\b/g, " have"], [/'ll\b/g, " will"]];
-export function norm(s) {
+// punct = true: commas, colons, semicolons and question/exclamation marks count (punctuation exercises)
+export function norm(s, punct = false) {
   let t = String(s ?? "")
     .toLowerCase()
     .replace(/[’‘`´]/g, "'")
     .replace(/[“”"«»]/g, " ")
-    .replace(/[,!?;:]/g, " ")
+    .replace(punct ? /\s*([,!?;:])\s*/g : /[,!?;:]/g, punct ? "$1 " : " ")
     .replace(/\.+(\s|$)/g, " ");
   for (const [re, to] of CONTR) t = t.replace(re, to);
   return t.replace(/\s+/g, " ").trim();
@@ -78,14 +79,15 @@ export function keyText(key) {
 // the answer shown to the student after checking: the first accepted variant
 export const firstKey = (key) => expandKey(Array.isArray(key) ? key[0] ?? "" : key ?? "")[0].replace(/\s+/g, " ").trim();
 
-export function isCorrect(given, key) {
+export function isCorrect(given, key, opts = {}) {
   if (given == null || norm(given) === "") return false;
+  const P = !!opts.punct;
   const variants = (Array.isArray(key) ? key : [key]).flatMap(expandKey);
   // "'d" can mean "had" or "would": try both
-  let gs = [norm(given)];
+  let gs = [norm(given, P)];
   for (let i = 0; i < 3 && gs.some((x) => /'d\b/.test(x)); i++)
     gs = gs.flatMap((x) => (/'d\b/.test(x) ? [x.replace(/'d\b/, " had"), x.replace(/'d\b/, " would")] : [x])).map((x) => x.replace(/\s+/g, " "));
-  const keysN = new Set(variants.map(norm));
+  const keysN = new Set(variants.map((v) => norm(v, P)));
   return gs.some((x) => keysN.has(x));
 }
 
@@ -99,7 +101,7 @@ export function gradeAuto(content, answers, keys) {
     for (const it of ex.items || []) {
       const given = answers?.[ex.id]?.[it.id] ?? "";
       const key = keys?.[ex.id]?.[it.id];
-      const ok = isCorrect(given, key);
+      const ok = isCorrect(given, key, { punct: ex.punct });
       items[ex.id][it.id] = { given, ok, correct: firstKey(key) };
       max += 1;
       if (ok) score += 1;
@@ -115,7 +117,7 @@ export function gradeExercise(ex, answers, keys) {
   for (const it of ex.items || []) {
     const given = answers?.[it.id] ?? "";
     const key = keys?.[it.id];
-    const ok = isCorrect(given, key);
+    const ok = isCorrect(given, key, { punct: ex.punct });
     items[it.id] = { given, ok, correct: firstKey(key) };
     if (ok) score += 1;
   }
@@ -167,6 +169,7 @@ export function renderBlocks(blocks, exOpts, numPrefix = "") {
     if (b.type === "image") return renderImages([b], b.layout);
     if (b.type === "images") return renderImages(b.items || [], b.layout || "grid");
     if (b.type === "audio") return renderAudio(b);
+    if (b.type === "video") return renderVideo(b);
     if (b.type === "exercise") { n += 1; return renderExercise(b, { num: numPrefix ? `${numPrefix}.${n}` : String(n), ...exOpts(b) }); }
     return "";
   }).join("\n");
@@ -200,7 +203,7 @@ export function renderExercise(ex, o = {}) {
       const input = it.choices
         ? `<select class="gap ${mark}" ${attrs}><option value="">choose…</option>${it.choices.map((c) => `<option value="${esc(c)}" ${val === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`
         : `<input class="gap ${ex.box ? "box" : ""} ${mark}" ${attrs} value="${esc(val)}" size="${size}" ${ex.box ? `style="width:${size + 1}ch"` : ""} ${NOAUTO}>`;
-      if (ex.inline) { inlineCtl[it.id] = `<span class="gn">${esc(it.id)}</span>${input}${corr}${keyHint}`; return ""; }
+      if (ex.inline) { inlineCtl[it.id] = `${ex.inlineNums === false ? "" : `<span class="gn">${esc(it.id)}</span>`}${input}${corr}${keyHint}`; return ""; }
       body = (it.text || "").includes("___") ? it.text.replace("___", input) : `<span class="li-t">${it.text || ""}</span>${input}`;
       body += corr + keyHint;
     } else if (ex.kind === "match") {
@@ -439,6 +442,17 @@ function renderImages(items, layout) {
     </figure>`).join("");
   return `<div class="pics ${items.length > 1 ? (layout === "row" ? "row" : "grid") : "one"}">${figs}</div>`;
 }
+// video from Rutube (or another site that allows embedding): b.src = embed address, b.url = page to open if the player does not load
+function renderVideo(b) {
+  const src = String(b.src || "");
+  const ok = /^https:\/\//.test(src);
+  return `<div class="video"><div class="vid-t">${esc(b.title || "Watch")}</div>
+    ${ok ? `<div class="vid-box"><iframe src="${esc(src)}" title="${esc(b.title || "Video")}" allow="clipboard-write; autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe></div>` : ""}
+    ${b.url ? `<div class="vid-n">If the video does not play, <a href="${esc(b.url)}" target="_blank" rel="noopener">open it on ${esc(b.site || "Rutube")}</a>.</div>` : ""}
+    ${b.note ? `<div class="vid-n">${esc(b.note)}</div>` : ""}
+  </div>`;
+}
+
 function renderAudio(b) {
   return `<div class="audio"><div class="au-ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/></svg></div><div class="au-b">
       <div class="au-t">${esc(b.title || "Listen")}</div>

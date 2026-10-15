@@ -4,14 +4,14 @@ import {
   auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, orderBy,
   writeBatch, arrayUnion, arrayRemove, serverTimestamp,
-} from "./fb.js?v=20261015h1";
-import { COURSE_TITLE } from "./firebase-config.js?v=20261015h1";
+} from "./fb.js?v=20261015h2";
+import { COURSE_TITLE } from "./firebase-config.js?v=20261015h2";
 import {
   esc, renderBlocks, renderExercise, exercisesOf, isAuto, gradeAuto, buildResult, keyText, norm,
   fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, KIND_LABEL, isTeacherChecked, gradeExercise, wireFlashcards, isManual,
-} from "./common.js?v=20261015h1";
-import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261015h1";
-import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, feedbackHTML, sleep } from "./writing.js?v=20261015h1";
+} from "./common.js?v=20261015h2";
+import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261015h2";
+import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, feedbackHTML, sleep } from "./writing.js?v=20261015h2";
 
 const $ = (s) => document.querySelector(s);
 const ls = {
