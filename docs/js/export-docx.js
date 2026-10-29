@@ -9,7 +9,7 @@ const GAP = "__________";
 const COLORS = { navy: "16233F", gold: "C08A2E", plum: "7B3F6B", teal: "1F7A72", mut: "6C7487", rule: "EEF4FB", disc: "E9F6F4", tnote: "F6EDF4", key: "FDF6E7" };
 
 // ---------------------------------------------------------------- HTML to docx
-const BLOCK = new Set(["P", "DIV", "UL", "OL", "LI", "TABLE", "H1", "H2", "H3", "H4", "H5", "SECTION", "BLOCKQUOTE"]);
+const BLOCK = new Set(["P", "DIV", "DETAILS", "UL", "OL", "LI", "TABLE", "H1", "H2", "H3", "H4", "H5", "SECTION", "BLOCKQUOTE"]);
 
 function inlineRuns(node, st = {}) {
   const out = [];
@@ -112,11 +112,12 @@ function blockOf(n, o, depth) {
     return out;
   }
   if (tag === "TABLE") return [tableOf(n), para([], { after: 80 })];
-  if (tag === "DIV") {
+  if (tag === "DIV" || tag === "DETAILS") {
     if (cls.contains("rule")) {
       const tagEl = n.querySelector(".rule-tag");
-      const h = n.querySelector(".rule-h");
-      const title = h ? h.textContent.replace(tagEl?.textContent || "", "").trim() : "";
+      const h = n.querySelector(".rule-h")?.cloneNode(true);
+      h?.querySelectorAll(".rule-tag,.rule-toggle").forEach((x) => x.remove());
+      const title = h ? h.textContent.trim() : "";
       const body = n.querySelector(".rule-b");
       return boxed(body ? walk(body, {}, depth + 1) : [], COLORS.rule, `${tagEl?.textContent || "Rule"} · ${title}`, COLORS.navy);
     }

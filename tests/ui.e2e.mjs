@@ -33,6 +33,17 @@ const page = async (url) => {
 };
 const shot = (p, n) => p.screenshot({ path: `${SHOTS}/${n}.png`, fullPage: false });
 const step = (t) => console.log("•", t);
+// every exercise must be marked "Done" before the unit can be submitted: go through the links in the unit bar
+async function markAllDone(p) {
+  for (let guard = 0; guard < 60; guard++) {
+    const btns = p.locator("#content [data-done]");
+    if (await btns.count()) { await btns.first().click(); await p.waitForTimeout(80); continue; }
+    const link = p.locator(".ub-left a").first();
+    if (!(await link.count())) break;
+    await link.click();
+    await p.waitForTimeout(250);
+  }
+}
 
 // --- seed: аккаунт преподавателя (в реальном проекте — через консоль Firebase)
 const t = await page("/teacher.html");
@@ -85,7 +96,7 @@ assert.equal(await s1.locator(".sb-item").count(), 0);
 assert.equal(await s1.locator(".sb-uh").count(), 16);
 await shot(s1, "02-student-locked");
 
-step("Преподаватель открывает Unit 1, у студента появляется без перезагрузки");
+step("Преподаватель открывает Unit 1 → у студента появляется без перезагрузки");
 await t.click('a[href="#tools/access"]');
 await t.click("[data-act=toggle-open][data-unit=u1]");
 await s1.waitForSelector('.sb-uh[data-unit="u1"][data-can-open="1"]', { timeout: 5000 });
@@ -132,7 +143,7 @@ const copyBlocked = await s1.evaluate(() => { const e = new Event("copy", { bubb
 assert.equal(copyBlocked, true, "копирование заблокировано");
 assert.equal(await s1.evaluate(() => getComputedStyle(document.querySelector("#content .ex-i")).userSelect), "none");
 
-step("Преподаватель проверяет одно упражнение, студент видит результат сразу");
+step("Преподаватель проверяет одно упражнение → студент видит результат сразу");
 await t.click('.sb-uh[data-unit="u1"]').catch(() => {});
 await t.click('.sb-item:has-text("Warm-up")');
 await t.waitForSelector('[data-act="check-ex"][data-ex="m1"]');
@@ -161,7 +172,7 @@ assert.equal(await s1.locator("#ex-m3 .ex-score").count(), 0, "1.1.3 ещё не
 await t.click('[data-act="check-ex"][data-ex="m3"]');
 await s1.waitForSelector("#ex-m3 .ex-score", { timeout: 5000 });
 assert.equal((await s1.textContent("#ex-m3 .ex-score")).trim(), "2 / 15", "варианты ответа принимаются");
-const arrows = await s1.evaluate(() => /[\u2190\u2192\u2934\u00ab\u00bb\u25bc\u203a\u25b6]/.test(document.body.innerText));
+const arrows = await s1.evaluate(() => /[→←⤮«»▼›]/.test(document.body.innerText));
 assert.equal(arrows, false, "в интерфейсе нет стрелок");
 await s1.locator("#ex-m4").screenshot({ path: `${SHOTS}/16-prepositions-checked.png` });
 
@@ -253,7 +264,7 @@ await t.waitForSelector("text=Anna Ivanova");
 await t.waitForSelector(".pill.warn:text('draft')");
 
 step("Студент 1 сдаёт работу");
-await s1.click("#submit-unit");
+await markAllDone(s1); await s1.click("#submit-unit");
 await s1.waitForSelector(".ub-sub");
 await s1.click('.sb-item:has-text("Grammar in Use")');
 assert.equal(await s1.locator(sel("g1", "1")).isDisabled(), true);
@@ -272,7 +283,7 @@ await s2.click('.sb-uh[data-unit="u1"]');
 await s2.click('.sb-item:has-text("Grammar in Use")');
 await s2.fill(sel("g1", "1"), "sends");
 await s2.fill(sel("g1", "2"), "is give");
-await s2.click("#submit-unit");
+await markAllDone(s2); await s2.click("#submit-unit");
 await s2.waitForSelector(".ub-sub");
 
 step("Преподаватель оценивает открытый ответ");
@@ -285,10 +296,19 @@ await t.click("#detail [data-act=save-grades] >> nth=0");
 await t.waitForSelector("text=Marks saved");
 await shot(t, "03-teacher-works");
 
+step("Кнопка «Return for revision» видна в таблице; возврат работы студенту");
+await t.waitForSelector("tr:has-text('Boris Petrov') [data-act=return]");
+await t.click("tr:has-text('Boris Petrov') [data-act=return]");
+await s2.waitForSelector(".ub-ret", { timeout: 5000 });
+await s2.waitForSelector("#submit-unit");
+await shot(s2, "19-student-returned");
+await markAllDone(s2); await s2.click("#submit-unit");
+await s2.waitForSelector(".ub-sub");
+
 step("Результаты не видны студенту до включения проверки");
 assert.equal(await s1.locator(".ub-res").count(), 0);
 
-step("Преподаватель включает проверку, студент видит результат сразу");
+step("Преподаватель включает проверку → студент видит результат сразу");
 await t.click('a[href="#tools/access"]');
 await t.click("[data-act=release][data-unit=u1]");
 await s1.waitForSelector(".ub-res", { timeout: 5000 });
