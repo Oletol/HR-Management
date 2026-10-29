@@ -288,6 +288,17 @@ export function renderExercise(ex, o = {}) {
       const minW = it.minWords || ex.minWords;
       const wc = minW ? `<div class="wc"><span class="wc-n" data-wc="${esc(ex.id)}:${esc(it.id)}">${countWords(val)}</span> words <span class="muted">· at least ${minW}</span></div>` : "";
       const model = o.key && o.key[it.id] ? `<div class="keyhint model"><b>Model answer:</b> ${esc(keyText(o.key[it.id]))}</div>` : "";
+      if (it.speak) {
+        // speaking task: the answer is recorded and turned into text in the browser (speaking.js, transcribe.js);
+        // the text cannot be typed or edited, only recorded again
+        const tr = `${ex.id}|${it.id}`;
+        const meta = parseSpeakMeta(a[it.id + "~m"]);
+        const info = meta.dur ? `<div class="wc"><span class="wc-n" data-wc="${esc(ex.id)}:${esc(it.id)}">${countWords(val)}</span> words · ${fmtSec(meta.dur)} · recording ${esc(meta.take || "1")}${meta.dur && countWords(val) ? ` · ${Math.round(countWords(val) / (meta.dur / 60))} words a minute` : ""}</div>` : "";
+        const rec = o.readOnly ? "" : speakingHTML({ sec: it.speak, tr, label: `Your answer (${fmtSec(it.speak)})` }, "speak-" + tr);
+        body = `${it.text}${model}${rec}<p class="trs" data-trs="${esc(tr)}"></p>
+          <textarea class="open-answer transcript" rows="${it.rows || 4}" readonly ${attrs} ${NOAUTO} placeholder="${o.readOnly ? "" : "Your words will appear here as text after you record your answer."}">${esc(val)}</textarea>
+          <input type="hidden" data-ex="${esc(ex.id)}" data-item="${esc(it.id)}~m" value="${esc(a[it.id + "~m"] ?? "")}" ${dis}>${info}${o.itemExtra ? o.itemExtra(it.id) : ""}${grade}`;
+      } else
       body = `${it.text}${model}<textarea class="open-answer" rows="${it.rows || 5}" ${attrs} ${NOAUTO} placeholder="${o.readOnly ? "" : "Type your answer here…"}">${esc(val)}</textarea>${wc}${o.itemExtra ? o.itemExtra(it.id) : ""}${grade}`;
     }
     return `<li${play ? ' class="has-play"' : ""}>${play}${play ? `<div class="li-body">${body}</div>` : body}</li>`;
@@ -495,6 +506,12 @@ function renderImages(items, layout) {
     </figure>`).join("");
   return `<div class="pics ${items.length > 1 ? (layout === "row" ? "row" : "grid") : "one"}">${figs}</div>`;
 }
+// "dur=58;words=96;take=2;model=…;at=…" – what the recorder saved next to a spoken answer
+export function parseSpeakMeta(s) {
+  return Object.fromEntries(String(s || "").split(";").filter(Boolean).map((p) => { const i = p.indexOf("="); return [p.slice(0, i), p.slice(i + 1)]; }));
+}
+const fmtSec = (s) => { s = Math.round(Number(s) || 0); return s >= 60 ? `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ""}` : `${s} s`; };
+
 // speaking timers with a voice recorder: drawn by speaking.js (registered there)
 let speakingImpl = () => "";
 export function registerSpeaking(fn) { speakingImpl = fn; }

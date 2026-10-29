@@ -1,7 +1,7 @@
 // Speaking: timers with an in-browser voice recorder (from the msupm2 course engine).
 // The recording never leaves the browser: it is kept in memory as a blob, played back here and,
 // if the student wants, saved to their own computer with "Download". Reloading the page clears it.
-import { registerSpeaking, esc } from "./common.js?v=20261021h";
+import { registerSpeaking, esc } from "./common.js?v=20261029a";
 
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const SPK = new Map();   // key -> state (survives re-rendering of the page)
@@ -10,7 +10,10 @@ const RING = 2 * Math.PI * 14;
 
 function speakingHTML(t, key) {
   const sec = Number(t.sec || 0), rec = t.record !== false;
-  return `<div class="spk" data-spk="${esc(key)}" data-sec="${sec}" data-rec="${rec ? 1 : 0}" translate="no">
+  const note = t.tr
+    ? `${sec ? "Record also starts the timer and stops when the time is up. " : ""}After each recording your words appear as text below (this takes a few seconds). Only the last recording is kept as text, and you cannot edit it: if you are not happy, record again. The sound itself stays in this browser.`
+    : `${sec ? "Record also starts the timer. " : ""}Your recording stays in this browser: nobody else hears it, and it disappears when you reload or close the page. Use Download to keep a copy or to send it to your teacher.`;
+  return `<div class="spk" data-spk="${esc(key)}" data-sec="${sec}" data-rec="${rec ? 1 : 0}"${t.tr ? ` data-tr="${esc(t.tr)}"` : ""} translate="no">
     ${t.label ? `<span class="spk-lab">${esc(t.label)}</span>` : ""}
     ${sec ? `<svg class="spk-ring" viewBox="0 0 34 34" aria-hidden="true"><circle class="bgc" cx="17" cy="17" r="14"/><circle class="fgc" cx="17" cy="17" r="14" stroke-dasharray="${RING}" stroke-dashoffset="0"/></svg>
       <span class="spk-time">${fmtT(sec)}</span>` : ""}
@@ -19,7 +22,7 @@ function speakingHTML(t, key) {
       ${rec ? `<button class="btn small rec" type="button" data-spk-act="rec"><span class="rec-dot"></span><span class="rl">Record</span></button>` : ""}
     </div>
     ${rec ? `<div class="spk-live" hidden><span class="rec-dot"></span><span class="spk-rt">REC 00:00</span><span class="spk-meter"><i></i></span><span class="spk-quiet" hidden>No sound – check the microphone</span></div>
-      <div class="spk-takes"></div><p class="spk-note">${sec ? "Record also starts the timer. " : ""}Your recording stays in this browser: nobody else hears it, and it disappears when you reload or close the page. Use Download to keep a copy or to send it to your teacher.</p>` : ""}
+      <div class="spk-takes"></div><p class="spk-note">${note}</p>` : ""}
   </div>`;
 }
 registerSpeaking(speakingHTML);
@@ -66,6 +69,49 @@ function syncSpk(el) {
   }
 }
 const syncKey = (key) => nodesOf(key).forEach(syncSpk);
+
+// ------------------------------------------------------------------ transcript (speaking tasks with "speak" items)
+// The recording is turned into text in this browser (Whisper, see transcribe.js); the text goes into the
+// read-only answer field of the item, so it is saved and sent to the teacher with Done like any other answer.
+const TRS = new Map();    // "exId|itemId" -> { msg, bad, busy }
+function setTrs(tr, msg, bad = false, busy = false) {
+  TRS.set(tr, { msg, bad, busy });
+  syncTrs(tr);
+}
+function syncTrs(tr) {
+  const s = TRS.get(tr);
+  document.querySelectorAll(`[data-trs="${CSS.escape(tr)}"]`).forEach((el) => {
+    el.textContent = s ? s.msg : "";
+    el.classList.toggle("bad", !!s?.bad);
+    el.classList.toggle("busy", !!s?.busy);
+  });
+}
+const field = (ex, item) => document.querySelector(`[data-ex="${CSS.escape(ex)}"][data-item="${CSS.escape(item)}"]`);
+let trQueue = Promise.resolve();
+function startTranscript(tr, blob, dur, take) {
+  setTrs(tr, "Your recording is waiting to be turned into text…", false, true);
+  trQueue = trQueue.then(async () => {
+    try {
+      const { transcribe, ASR_MODEL_NAME } = await import("./transcribe.js?v=20261029a");
+      const { text } = await transcribe(blob, (m) => setTrs(tr, m, false, true));
+      const [ex, item] = tr.split("|");
+      if (!text) { setTrs(tr, "No words were recognised. Check the microphone, speak a little closer and record again.", true); return; }
+      const ta = field(ex, item), meta = field(ex, item + "~m");
+      if (!ta || ta.disabled) { setTrs(tr, "The exercise is closed, so the new text was not saved.", true); return; }
+      ta.value = text;
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+      if (meta) {
+        const words = (text.match(/[A-Za-z]+(?:'[a-z]+)?/g) || []).length;
+        meta.value = `dur=${Math.round(dur)};words=${words};take=${take};model=${ASR_MODEL_NAME};at=${new Date().toISOString()}`;
+        meta.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      setTrs(tr, `✓ Recording ${take} is now text (${Math.round(dur)} seconds). Not happy? Record again. When you are ready, click Done.`);
+    } catch (e) {
+      console.warn(e);
+      setTrs(tr, "Your speech could not be turned into text in this browser (" + (e?.message || "error") + "). Try Google Chrome on a computer. You can also download the recording and send it to your teacher.", true);
+    }
+  });
+}
 
 function tick(key) {
   const st = SPK.get(key);
@@ -168,7 +214,10 @@ async function startRec(key) {
     const ext = /mp4/.test(mime) ? "m4a" : /ogg/.test(mime) ? "ogg" : "webm";
     if (blob.size) {
       const url = URL.createObjectURL(blob);
-      st.takes.push({ url, dur: (Date.now() - t0) / 1000, name: `speaking-${key}-take${st.takes.length + 1}.${ext}` });
+      const dur = (Date.now() - t0) / 1000;
+      st.takes.push({ url, dur, name: `speaking-${key}-take${st.takes.length + 1}.${ext}` });
+      const tr = nodesOf(key)[0]?.dataset.tr;
+      if (tr) startTranscript(tr, blob, dur, st.takes.length);
     } else st.err = "The recording is empty: the microphone sent no sound. Check which microphone the browser uses (the icon in the address bar) and try again.";
     stopMeter(st);
     st.stream?.getTracks().forEach((t) => t.stop());
@@ -254,5 +303,5 @@ let pending = false;
 new MutationObserver((ms) => {
   if (pending || !ms.some((m) => m.target.nodeType === 1 && !m.target.closest(".spk"))) return;
   pending = true;
-  requestAnimationFrame(() => { pending = false; $$(".spk").forEach(syncSpk); });
+  requestAnimationFrame(() => { pending = false; $$(".spk").forEach(syncSpk); for (const tr of TRS.keys()) syncTrs(tr); });
 }).observe(document.documentElement, { childList: true, subtree: true });

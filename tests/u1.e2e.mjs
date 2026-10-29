@@ -115,10 +115,17 @@ await s.locator("#save-state", { hasText: /Saved|saved/ }).waitFor({ timeout: 50
 step("Teacher checks exercises one by one");
 await t.click('.sb-uh[data-unit="u1"]').catch(() => {});
 const check = async (secName, id, expect) => {
-  await t.click(`.sb-item:has-text("${secName}")`);
+  // answers reach the teacher only when the student clicks Done
+  await s.click(`.sb-item[href^="#u1/"]:has-text("${secName}")`);
+  await s.waitForSelector(`#ex-${id}`);
+  if (await s.locator(`[data-done="${id}"]`).count()) {
+    await s.click(`[data-done="${id}"]`);
+    await s.locator("#save-state", { hasText: /Sent to your teacher/ }).waitFor({ timeout: 5000 });
+  }
+  await t.click(`.sb-item[href^="#u1/"]:has-text("${secName}")`);
   await t.waitForSelector(`[data-act="check-ex"][data-ex="${id}"]`);
   await t.click(`[data-act="check-ex"][data-ex="${id}"]`);
-  await s.click(`.sb-item:has-text("${secName}")`);
+  await s.click(`.sb-item[href^="#u1/"]:has-text("${secName}")`);
   await s.waitForSelector(`#ex-${id} .ex-score`, { timeout: 5000 });
   assert.equal((await s.textContent(`#ex-${id} .ex-score`)).trim(), expect, id);
 };

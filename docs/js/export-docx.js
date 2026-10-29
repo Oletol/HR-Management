@@ -206,6 +206,7 @@ function exerciseBlocks(ex, num, keys, teacher) {
         (it.options || []).forEach((t, j) => out.push(para([new TextRun({ text: `${"ABCDEFGH"[j]}   `, bold: true, color: COLORS.gold }), ...inlineRuns(parse(t))], { indent: { left: 720 }, after: 30 })));
       } else if (ex.kind === "open") {
         out.push(para([new TextRun({ text: n, bold: true }), ...inlineRuns(parse(it.text))], { indent: { left: 360, hanging: 300 }, after: 40 }));
+        if (it.speak) { out.push(para([new TextRun({ text: `Speak for ${it.speak >= 60 ? `${Math.round(it.speak / 6) / 10} min` : `${it.speak} s`} and record your answer on the course website.`, italics: true, color: COLORS.mut })], { indent: { left: 360 }, after: 80 })); return; }
         const rows = Math.min(Math.max(it.rows || ex.rows || 3, 2), 10);
         for (let r = 0; r < rows; r++) out.push(para([new TextRun({ text: "_".repeat(78), color: "B0B7C3" })], { indent: { left: 360 }, after: 60 }));
         const mw = it.minWords || ex.minWords;

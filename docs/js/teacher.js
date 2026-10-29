@@ -4,16 +4,17 @@ import {
   auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, orderBy,
   writeBatch, arrayUnion, arrayRemove, serverTimestamp, deleteField,
-} from "./fb.js?v=20261021h";
-import { COURSE_TITLE } from "./firebase-config.js?v=20261021h";
+} from "./fb.js?v=20261029a";
+import { COURSE_TITLE } from "./firebase-config.js?v=20261029a";
 import {
   esc, renderBlocks, renderExercise, exercisesOf, isAuto, gradeAuto, buildResult, keyText, norm,
   fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, KIND_LABEL, isTeacherChecked, gradeExercise, wireFlashcards, isManual,
   isCorrect, readInput, doneMap, isTranslation, exerciseNumbers, fmtDate, todayISO, answerLabel, r2,
-} from "./common.js?v=20261021h";
-import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261021h";
-import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, feedbackHTML, sleep } from "./writing.js?v=20261021h";
-import "./speaking.js?v=20261021h";
+} from "./common.js?v=20261029a";
+import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261029a";
+import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, feedbackHTML, sleep } from "./writing.js?v=20261029a";
+import "./speaking.js?v=20261029a";
+import { trackedTasks, measure, METRICS, toCSV } from "./progress.js?v=20261029a";
 
 const $ = (s) => document.querySelector(s);
 const ls = {
@@ -45,6 +46,7 @@ const TOOLS = [
   { id: "tests", icon: "⏱", title: "Tests", sub: "Timed tests: open, watch, check" },
   { id: "stats", icon: "📊", title: "Analytics", sub: "Difficult questions, heat map" },
   { id: "journal", icon: "📅", title: "Attendance", sub: "Lesson dates, present and absent" },
+  { id: "progress", icon: "📈", title: "Progress", sub: "Speaking and writing over time, CSV" },
   { id: "groups", icon: "👥", title: "Groups & students", sub: "Group codes, moving and removing students" },
   { id: "content", icon: "📦", title: "Course content", sub: "Import units and keys" },
 ];
@@ -216,7 +218,7 @@ function render(force = false) {
   if (r.unit) { $("#view").innerHTML = viewUnit(r); T.unitViewKey = unitViewKey(r); return; }
   const tool = TOOLS.find((t) => t.id === r.tool);
   $("#crumb").innerHTML = `<b>Teaching tools</b> &middot; ${tool.title}`;
-  const views = { access: viewAccess, works: viewWorks, tests: viewTests, stats: viewStats, content: viewContent, groups: viewGroups, journal: viewJournal };
+  const views = { access: viewAccess, works: viewWorks, tests: viewTests, stats: viewStats, content: viewContent, groups: viewGroups, journal: viewJournal, progress: viewProgress };
   $("#view").innerHTML = views[r.tool]();
 }
 
@@ -279,7 +281,7 @@ async function downloadDocx(unitId, ver, btn) {
   try {
     const d = await loadUnitData(unitId);
     if (!d?.content) throw new Error("This unit has no content yet.");
-    const { exportUnitDocx, saveBlob } = await import("./export-docx.js?v=20261021h");
+    const { exportUnitDocx, saveBlob } = await import("./export-docx.js?v=20261029a");
     const teacher = ver === "teacher";
     const sections = d.content.sections.map((s) => ({ ...s, subtitle: (u.sections || []).find((m) => m.id === s.id)?.subtitle || s.subtitle || "" }));
     const blob = await exportUnitDocx({ courseTitle: COURSE_TITLE, unitNum: unitNum(u), unitTitle: u.title, sections,
@@ -541,7 +543,7 @@ function writingBar(u, ex, g) {
   return `<div class="tb-row"><span>Group <b>${esc(g.name)}</b>: <span class="pill ${done ? "on" : "off"}">${done ? "feedback shown" : "not checked yet"}</span></span>
     <span class="sp" style="flex:1"></span>
     <span id="wcheck-progress" class="muted"></span>
-    <button class="btn small good" data-act="check-writing" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}" ${g.openUnits.includes(u.id) ? "" : "disabled"}>${done ? "Check again" : "Check the writing now"}</button>
+    <button class="btn small good" data-act="check-writing" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}" ${g.openUnits.includes(u.id) ? "" : "disabled"}>${done ? "Check again" : (ex.items || []).some((it) => it.speak) ? "Check the speaking now" : "Check the writing now"}</button>
     ${done ? `<button class="btn small danger" data-act="hide-writing" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}">Hide feedback</button>` : ""}
   </div>`;
 }
@@ -560,7 +562,8 @@ async function checkWriting(gid, unitId, exId) {
       n++;
       const prog = document.querySelector("#wcheck-progress");
       if (prog) prog.textContent = `Checking ${n} of ${subs.length}…`;
-      const texts = s.answers[exId] || {};
+      // only the answers themselves (not what the recorder saved next to a spoken answer: "1~m")
+      const texts = Object.fromEntries((ex.items || []).map((it) => [it.id, s.answers[exId]?.[it.id] || ""]));
       let issues = {}, grammarError = false;
       try { issues = await grammarCheck(texts); } catch (e) { console.warn(e); grammarError = true; ltFailed++; }
       const fb = {};
@@ -1254,3 +1257,184 @@ async function releaseTest(key) {
     toast(`Checked: ${atts.length}. Students can see their results now.`);
   });
 }
+
+// ================================================================== Progress: speaking and writing over time
+// For research: each student's recorded answers (transcripts) and tracked written texts, measured task by task.
+// Data: submissions (texts, sent with Done) + exerciseResults (LanguageTool check) of the current group.
+T.prog = null;
+T.progOpt = { skill: ls.get("progSkill", "speaking"), metric: ls.get("progMetric", "words"), open: null };
+
+async function loadProgress() {
+  const gid = T.gid;
+  if (!gid) return;
+  T.prog = { gid, loading: true };
+  try {
+    const units = T.units.filter((u) => u.status !== "soon");
+    const [V, subsSnap, exrSnap] = await Promise.all([
+      loadVocab(),
+      getDocs(query(collection(db, "submissions"), where("groupId", "==", gid))),
+      getDocs(query(collection(db, "exerciseResults"), where("groupId", "==", gid))),
+    ]);
+    const content = {};
+    for (const u of units) content[u.id] = (await loadUnitData(u.id)).content;
+    const tasks = trackedTasks(units, content).map((t) => ({ ...t, num: exerciseNumbers(content[t.unitId], unitNum(T.units.find((u) => u.id === t.unitId)))[t.exId] }));
+    const phrases = Object.fromEntries(units.map((u) => [u.id, unitVocabulary(content[u.id])]));
+    const exr = {};
+    exrSnap.docs.forEach((d) => { const r = d.data(); exr[r.unitId + "|" + r.uid] = r; });
+    const rows = [];
+    for (const d of subsSnap.docs) {
+      const s = d.data();
+      for (const t of tasks) {
+        if (t.unitId !== s.unitId) continue;
+        const text = s.answers?.[t.exId]?.[t.itemId];
+        if (!String(text || "").trim()) continue;
+        const fb = exr[s.unitId + "|" + s.uid]?.feedback?.[t.exId]?.[t.itemId];
+        rows.push({ uid: s.uid, key: t.key, text: String(text), status: s.status, updatedAt: s.updatedAt,
+          m: measure(text, V, phrases[t.unitId], fb, s.answers?.[t.exId]?.[t.itemId + "~m"]) });
+      }
+    }
+    T.prog = { gid, tasks, rows, at: new Date() };
+  } catch (e) {
+    console.error(e);
+    T.prog = { gid, error: friendlyError(e) };
+  }
+  if (route().tool === "progress") render(true);
+}
+
+const fmtV = (v, id) => (v === null || v === undefined || Number.isNaN(v) ? "–" : id === "mattr" ? Number(v).toFixed(2) : String(v));
+
+function sparkline(vals, dir) {
+  const pts = vals.map((v, i) => [i, v]).filter(([, v]) => typeof v === "number");
+  if (pts.length < 2) return "";
+  const W = 90, H = 24, xs = vals.length - 1 || 1;
+  const lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1])), span = hi - lo || 1;
+  const P = pts.map(([i, v]) => `${(4 + (i / xs) * (W - 8)).toFixed(1)},${(H - 4 - ((v - lo) / span) * (H - 8)).toFixed(1)}`);
+  const up = (pts[pts.length - 1][1] - pts[0][1]) * dir >= 0;
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true"><polyline points="${P.join(" ")}" fill="none" stroke="var(${up ? "--ok" : "--bad"})" stroke-width="1.8"/>${P.map((p) => `<circle cx="${p.split(",")[0]}" cy="${p.split(",")[1]}" r="1.8" fill="var(${up ? "--ok" : "--bad"})"/>`).join("")}</svg>`;
+}
+
+function progressChart(tasks, series, mean, M) {
+  const all = [...series.flatMap((s) => s.vals), ...mean].filter((v) => typeof v === "number");
+  if (!all.length || tasks.length < 2) return "";
+  const W = 640, H = 220, L = 44, R = 12, Tp = 14, B = 34;
+  const lo = Math.min(0, ...all), hi = Math.max(...all) || 1;
+  const x = (i) => L + (i / (tasks.length - 1)) * (W - L - R);
+  const y = (v) => Tp + (1 - (v - lo) / (hi - lo || 1)) * (H - Tp - B);
+  const line = (vals) => { const p = vals.map((v, i) => (typeof v === "number" ? `${x(i).toFixed(1)},${y(v).toFixed(1)}` : null)).filter(Boolean); return p.length > 1 ? p.join(" ") : ""; };
+  const ticks = [lo, (lo + hi) / 2, hi].map((v) => `<text x="${L - 6}" y="${y(v) + 4}" text-anchor="end" class="ax">${fmtV(Math.round(v * 100) / 100, M.id)}</text><line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="grid"/>`).join("");
+  const xl = tasks.map((t, i) => `<text x="${x(i)}" y="${H - 12}" text-anchor="middle" class="ax">T${i + 1}</text>`).join("");
+  const st = series.map((s) => { const p = line(s.vals); return p ? `<polyline points="${p}" class="st"><title>${esc(s.name)}</title></polyline>` : ""; }).join("");
+  const mp = line(mean);
+  const md = mean.map((v, i) => (typeof v === "number" ? `<circle cx="${x(i)}" cy="${y(v)}" r="3.5" class="mn"><title>T${i + 1}: group mean ${fmtV(v, M.id)}</title></circle>` : "")).join("");
+  return `<figure class="prog-chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(M.label)}: group mean by task">${ticks}${xl}${st}${mp ? `<polyline points="${mp}" class="mn"/>` : ""}${md}</svg>
+    <figcaption><span class="lg mn"></span> group mean &nbsp; <span class="lg st"></span> individual students (hover for the name)</figcaption></figure>`;
+}
+
+function viewProgress() {
+  const g = group();
+  const head = pageHead("Teaching tools", "Progress",
+    "How each student's speaking and writing change from task to task. Speaking: recorded answers turned into text in the student's browser (Whisper). "
+    + "Writing: texts in exercises marked for tracking. Error counts appear after you click <b>Check the speaking now</b> or <b>Check the writing now</b> above the exercise.");
+  if (!g) return head + `<div class="box">First create a group in <a href="#tools/groups">Groups &amp; students</a>.</div>`;
+  if (!T.prog || T.prog.gid !== T.gid) { loadProgress(); return head + `<p class="muted">Loading the texts of group ${esc(g.name)}…</p>`; }
+  if (T.prog.loading) return head + `<p class="muted">Loading the texts of group ${esc(g.name)}…</p>`;
+  if (T.prog.error) return head + `<div class="box">The data could not be loaded: ${esc(T.prog.error)} <button class="btn small" data-act="prog-reload">Try again</button></div>`;
+  const O = T.progOpt;
+  const tasks = T.prog.tasks.filter((t) => t.skill === O.skill);
+  const metrics = METRICS.filter((m) => !m.skill || m.skill === O.skill);
+  const M = metrics.find((m) => m.id === O.metric) || metrics[0];
+  const by = new Map(T.prog.rows.map((r) => [r.uid + "|" + r.key, r]));
+  const studs = T.students;
+  const val = (uid, t) => { const r = by.get(uid + "|" + t.key); return r ? r.m[M.id] : undefined; };
+  const series = studs.map((s) => ({ name: s.name, uid: s.uid, vals: tasks.map((t) => val(s.uid, t)) }));
+  const mean = tasks.map((t, i) => { const v = series.map((s) => s.vals[i]).filter((x) => typeof x === "number"); return v.length ? Math.round((v.reduce((a, b) => a + b, 0) / v.length) * 100) / 100 : null; });
+  const counts = tasks.map((t, i) => series.filter((s) => typeof s.vals[i] === "number").length);
+
+  const controls = `<div class="prog-ctl">
+      <span class="seg">${["speaking", "writing"].map((k) => `<button class="${O.skill === k ? "on" : ""}" data-act="prog-skill" data-skill="${k}">${k === "speaking" ? "Speaking" : "Writing"}</button>`).join("")}</span>
+      <label>Measure <select id="prog-metric">${metrics.map((m) => `<option value="${m.id}" ${m.id === M.id ? "selected" : ""}>${esc(m.label)}</option>`).join("")}</select></label>
+      <span style="flex:1"></span>
+      <button class="btn small" data-act="prog-reload">Refresh</button>
+      <button class="btn small primary" data-act="prog-csv">Download all data (.csv)</button>
+    </div>`;
+  if (!tasks.length) return head + controls + `<div class="box">There are no ${O.skill === "speaking" ? "recorded speaking tasks" : "tracked writing tasks"} in the open units yet.</div>`;
+
+  const taskHead = tasks.map((t, i) => `<th title="${esc(`${t.num || ""} ${t.title} – ${t.prompt}`)}">T${i + 1}<span class="s">${esc(t.num || "")}${t.itemId !== "1" || tasks.filter((x) => x.exId === t.exId && x.unitId === t.unitId).length > 1 ? "·" + esc(t.itemId) : ""}</span></th>`).join("");
+  const rowsHTML = series.map((s) => {
+    const nums = s.vals.filter((v) => typeof v === "number");
+    const change = nums.length > 1 ? Math.round((nums[nums.length - 1] - nums[0]) * 100) / 100 : null;
+    const good = change !== null && change * M.dir > 0, bad = change !== null && change * M.dir < 0;
+    return `<tr><td class="nm">${esc(s.name)}</td>${s.vals.map((v, i) => `<td class="num">${typeof v === "number" ? `<a href="#" data-act="prog-open" data-uid="${esc(s.uid)}" data-key="${esc(tasks[i].key)}">${fmtV(v, M.id)}</a>` : `<span class="muted">–</span>`}</td>`).join("")}
+      <td class="num ${good ? "up" : bad ? "down" : ""}">${change === null ? "–" : (change > 0 ? "+" : "") + fmtV(change, M.id)}</td><td>${sparkline(s.vals, M.dir)}</td></tr>`;
+  }).join("");
+  const table = `<div class="tbl-wrap"><table class="t prog"><thead><tr><th>Student</th>${taskHead}<th>Change</th><th>Trend</th></tr></thead>
+    <tbody>${rowsHTML}</tbody>
+    <tfoot><tr><td><b>Group mean</b></td>${mean.map((v) => `<td class="num"><b>${fmtV(v, M.id)}</b></td>`).join("")}<td></td><td>${sparkline(mean, M.dir)}</td></tr>
+      <tr><td class="muted">Answers</td>${counts.map((c) => `<td class="num muted">${c}</td>`).join("")}<td></td><td></td></tr></tfoot></table></div>`;
+  const legend = `<ol class="prog-tasks">${tasks.map((t, i) => `<li><b>T${i + 1}</b> · ${esc(t.num || "")} ${esc(t.title)}${t.sec ? ` · ${t.sec} s` : ""} <span class="muted">${esc(t.prompt.slice(0, 110))}${t.prompt.length > 110 ? "…" : ""}</span></li>`).join("")}</ol>`;
+
+  let detail = "";
+  if (O.open) {
+    const r = by.get(O.open.uid + "|" + O.open.key), t = T.prog.tasks.find((x) => x.key === O.open.key);
+    const st = studs.find((x) => x.uid === O.open.uid);
+    if (r && t) {
+      const m = r.m;
+      const facts = [["Words", m.words], ...(t.skill === "speaking" ? [["Recording", m.dur ? `${m.dur} s` : "–"], ["Words a minute", fmtV(m.wpm)], ["Recording number", m.take ?? "–"]] : [["Words per sentence", m.sentLen]]),
+        ["MATTR-50", fmtV(m.mattr, "mattr")], ["TTR", m.ttr], ["B2+ words", m.b2plus + "%"], ["C1+ words", m.c1plus + "%"],
+        ["Unit phrases", `${m.unitPhrases}${m.unitPhraseList ? ` (${esc(m.unitPhraseList)})` : ""}`], ["Subordinating words / 100", m.subPer100],
+        ["LanguageTool", m.ltChecked ? `${m.ltAll} issues, ${m.ltGrammar} grammar · ${m.errPer100} errors per 100 words` : "not checked yet"]];
+      detail = `<div class="box prog-detail" id="prog-detail"><div class="row" style="justify-content:space-between"><b>${esc(st?.name || "")} · T${tasks.indexOf(t) + 1} · ${esc(t.num || "")} ${esc(t.title)}</b>
+        <button class="btn small" data-act="prog-close">Close</button></div>
+        <p class="muted">${esc(t.prompt)}</p>
+        <div class="prog-text">${esc(r.text)}</div>
+        ${m.checkedText && m.checkedText !== r.text ? `<details><summary>Text at the time of the check</summary><div class="prog-text">${esc(m.checkedText)}</div></details>` : ""}
+        <dl class="prog-facts">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></div>`;
+    }
+  }
+  return head + controls + detail + progressChart(tasks, series, mean, M) + table + legend
+    + `<p class="muted" style="font-size:13px">Measures: MATTR-50 – moving-average type–token ratio over 50-word windows (Covington &amp; McFall, 2010); B2+ – share of words from CEFR-J (A1–B2) and Octanove (C1–C2) lists at B2 or above;
+      subordinating words – <i>because, although, which, who, when, if…</i> per 100 words; errors – LanguageTool issues except punctuation and style, per 100 words.
+      Whisper tends to smooth out hesitations and some slips, so speaking accuracy is somewhat overestimated; compare a sample of transcripts with the recordings before publishing.
+      Loaded ${fmtTime(T.prog.at)}.</p>`;
+}
+
+function progressCSV() {
+  if (!T.prog?.rows) return;
+  const g = group();
+  const uids = [...new Set([...T.students.map((s) => s.uid), ...T.prog.rows.map((r) => r.uid)])];
+  const code = Object.fromEntries(uids.map((u, i) => [u, "S" + String(i + 1).padStart(2, "0")]));
+  const nameOf = Object.fromEntries(T.students.map((s) => [s.uid, s.name]));
+  const order = Object.fromEntries(T.prog.tasks.map((t, i) => [t.key, i]));
+  const taskNo = {};
+  for (const sk of ["speaking", "writing"]) T.prog.tasks.filter((t) => t.skill === sk).forEach((t, i) => (taskNo[t.key] = i + 1));
+  const rows = [...T.prog.rows].sort((a, b) => (code[a.uid] || "").localeCompare(code[b.uid] || "") || order[a.key] - order[b.key]).map((r) => {
+    const t = T.prog.tasks.find((x) => x.key === r.key), m = r.m;
+    return { code: code[r.uid], student: nameOf[r.uid] || "", group: g?.name || "", skill: t.skill, unit: t.unitOrder, task_no: taskNo[t.key], exercise: t.num || t.exId, item: t.itemId,
+      task_title: t.title, recorded_at: m.recordedAt, submitted: r.status === "submitted" ? "yes" : "no",
+      words: m.words, duration_s: m.dur || "", wpm: m.wpm ?? "", take: m.take ?? "", ttr: m.ttr, mattr50: m.mattr, b2plus_pct: m.b2plus, c1plus_pct: m.c1plus,
+      unit_phrases: m.unitPhrases, unit_phrase_list: m.unitPhraseList, words_per_sentence: m.sentLen, subordinators_per100: m.subPer100,
+      lt_checked: m.ltChecked ? "yes" : "no", lt_issues_all: m.ltAll ?? "", lt_grammar: m.ltGrammar ?? "", errors_per100: m.errPer100 ?? "", text: r.text, text_at_check: m.checkedText };
+  });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([toCSV(rows)], { type: "text/csv;charset=utf-8" }));
+  a.download = `${COURSE_TITLE.replace(/[^\w]+/g, "-")}_${(g?.name || "group").replace(/[^\w]+/g, "-")}_progress_${todayISO()}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+document.addEventListener("click", (e) => {
+  const b = e.target.closest?.("[data-act^='prog-']");
+  if (!b) return;
+  e.preventDefault();
+  const O = T.progOpt;
+  const act = b.dataset.act;
+  if (act === "prog-skill") { O.skill = b.dataset.skill; ls.set("progSkill", O.skill); O.open = null; render(true); }
+  if (act === "prog-reload") { T.prog = null; O.open = null; render(true); }
+  if (act === "prog-csv") progressCSV();
+  if (act === "prog-open") { O.open = { uid: b.dataset.uid, key: b.dataset.key }; render(true); setTimeout(() => $("#prog-detail")?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 30); }
+  if (act === "prog-close") { O.open = null; render(true); }
+});
+document.addEventListener("change", (e) => {
+  if (e.target.id !== "prog-metric") return;
+  T.progOpt.metric = e.target.value; ls.set("progMetric", e.target.value); render(true);
+});

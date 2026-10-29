@@ -580,3 +580,45 @@ i.vb{font-family:var(--sans);font-size:.88em;color:var(--plum);white-space:nowra
 .jx.home{background:var(--gold3);color:#8a5d13}
 @media print{.ex-foot,.ex-bar{display:none!important}}
 .jt td.jc.num{text-align:center}
+
+/* ---------- speaking tasks with a transcript (Whisper in the browser) ---------- */
+.trs{margin:6px 0 4px;font-size:13px;color:var(--mut);min-height:0}
+.trs:empty{display:none}
+.trs.busy{color:var(--navy2)}
+.trs.busy::before{content:"";display:inline-block;width:10px;height:10px;margin-right:7px;border:2px solid var(--line);border-top-color:var(--navy2);border-radius:50%;vertical-align:-1px;animation:trs-spin .8s linear infinite}
+.trs.bad{color:var(--bad)}
+@keyframes trs-spin{to{transform:rotate(360deg)}}
+textarea.transcript{background:var(--bg);font-family:var(--serif);font-size:15px;line-height:1.55;cursor:default}
+textarea.transcript:focus{outline:none;box-shadow:none}
+
+/* ---------- Progress (teacher) ---------- */
+.prog-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:6px 0 16px}
+.prog-ctl .seg button.on{background:var(--navy2);color:#fff}
+.prog-ctl select{font:inherit;padding:4px 6px;border:1px solid var(--line);border-radius:7px;background:#fff}
+.t.prog th .s{display:block;font-weight:500;font-size:11px;color:#c9d2e3;letter-spacing:0;text-transform:none}
+.t.prog td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.t.prog td.nm{white-space:nowrap}
+.t.prog td.up{color:var(--ok);font-weight:700}
+.t.prog td.down{color:var(--bad);font-weight:700}
+.t.prog tfoot td{border-top:2px solid var(--line)}
+.t.prog a{color:inherit;text-decoration:underline dotted;text-underline-offset:3px}
+.spark{display:block}
+.prog-chart{margin:4px 0 18px;padding:12px 14px 6px;background:#fff;border:1px solid var(--line);border-radius:var(--r2);max-width:760px}
+.prog-chart svg{width:100%;height:auto;display:block}
+.prog-chart .ax{font-size:11px;fill:var(--mut)}
+.prog-chart .grid{stroke:var(--line2);stroke-width:1}
+.prog-chart polyline.st{fill:none;stroke:#b9c2d3;stroke-width:1.4}
+.prog-chart polyline.st:hover{stroke:var(--gold);stroke-width:2.4}
+.prog-chart polyline.mn{fill:none;stroke:var(--navy2);stroke-width:3}
+.prog-chart circle.mn{fill:var(--navy2)}
+.prog-chart figcaption{font-size:12px;color:var(--mut);margin-top:4px}
+.prog-chart .lg{display:inline-block;width:18px;height:0;border-top:3px solid var(--navy2);vertical-align:middle;margin-right:4px}
+.prog-chart .lg.st{border-top:2px solid #b9c2d3}
+.prog-tasks{font-size:13px;margin:14px 0;padding-left:20px;color:var(--ink2)}
+.prog-tasks li{margin:3px 0}
+.prog-detail .prog-text{white-space:pre-wrap;font-family:var(--serif);font-size:15px;line-height:1.6;background:var(--bg);border-radius:8px;padding:10px 12px;margin:8px 0}
+.prog-facts{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;font-size:13.5px;margin:10px 0 0}
+.prog-facts dt{color:var(--mut)}
+.prog-facts dd{margin:0}
+.tbl-wrap{overflow-x:auto;max-width:100%}
+.tbl-wrap table.t{min-width:max-content}

@@ -91,7 +91,17 @@ await s.selectOption(sel("w5", "1"), "logos");
 await s.locator("#save-state", { hasText: /Saved|saved/ }).waitFor({ timeout: 5000 });
 step("Teacher checks");
 await t.click('.sb-uh[data-unit="u2"]').catch(() => {});
+// answers reach the teacher only when the student clicks Done
+const sendDone = async (href, id) => {
+  await s.click(`.sb-item[href$="u2/${href}"]`);
+  await s.waitForSelector(`#ex-${id}`);
+  if (await s.locator(`[data-done="${id}"]`).count()) {
+    await s.click(`[data-done="${id}"]`);
+    await s.locator("#save-state", { hasText: /Sent to your teacher/ }).waitFor({ timeout: 5000 });
+  }
+};
 const check = async (id, expect) => {
+  await sendDone("warmup", id);
   await t.click('.sb-item[href$="u2/warmup"]');
   await t.waitForSelector(`[data-act="check-ex"][data-ex="${id}"]`);
   await t.click(`[data-act="check-ex"][data-ex="${id}"]`);
@@ -107,7 +117,7 @@ await t.waitForSelector("#view .tnote");
 await shot(t, "t-warmup", true);
 
 step("Reading, Vocabulary, Grammar");
-for (const [secName, href] of [["Reading", "reading"], ["Vocabulary Practice", "vocabulary"], ["Grammar in Use", "grammar"], ["Listening", "listening"], ["Speaking", "speaking"], ["Supplementary Reading", "supplementary"]]) {
+for (const [secName, href] of [["Reading", "reading"], ["Vocabulary Practice", "vocabulary"], ["Grammar in Use", "grammar"], ["Listening", "listening"], ["Speaking", "speaking"], ["Writing", "writing"], ["Supplementary Reading", "supplementary"]]) {
   await s.click(`.sb-item[href$="u2/${href}"]`);
   await s.waitForSelector("#content .ex");
   const tx = await s.evaluate(() => document.body.innerText);
@@ -131,6 +141,7 @@ await s.selectOption(sel("g4", "1"), "would");
 await s.fill(sel("g3", "4"), "didn't understand");
 await s.locator("#save-state", { hasText: /Saved|saved/ }).waitFor({ timeout: 5000 });
 const check2 = async (href, id, expect) => {
+  await sendDone(href, id);
   await t.click(`.sb-item[href$="u2/${href}"]`);
   await t.waitForSelector(`[data-act="check-ex"][data-ex="${id}"]`);
   await t.click(`[data-act="check-ex"][data-ex="${id}"]`);
