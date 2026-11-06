@@ -1,6 +1,6 @@
 // Measures of students' speaking (Whisper transcripts) and writing, for the Progress page of the Teacher's Edition
 // and for the CSV export used in research. Everything is computed in the teacher's browser.
-import { tokens, lemma, vocabProfile } from "./writing.js?v=20261106h";
+import { tokens, lemma, vocabProfile } from "./writing.js?v=20261106i";
 
 // Writing that is followed over time: open exercises marked "track": "writing" in the course file,
 // or one-text exercises in a Writing section / with a letter, essay, report, review or article to write.
@@ -8,6 +8,8 @@ export function isWritingTask(ex) {
   if (ex.kind !== "open" || ex.transcript || ex.graded === false) return false;
   if (ex.track === "writing") return true;
   if (ex.track === false) return false;
+  // every marked written answer counts: texts, letters, translations, own sentences (all items together)
+  if (ex.check === "teacher") return true;
   const answerable = (ex.items || []).filter((it) => !it.plain);
   if (answerable.length !== 1) return false;
   return /writing/i.test(ex.sectionTitle || "") || /letter|essay|report|review|article|proposal|write your/i.test(ex.title || "");

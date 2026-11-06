@@ -4,17 +4,17 @@ import {
   auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, orderBy,
   writeBatch, arrayUnion, arrayRemove, serverTimestamp, deleteField,
-} from "./fb.js?v=20261106h";
-import { COURSE_TITLE } from "./firebase-config.js?v=20261106h";
+} from "./fb.js?v=20261106i";
+import { COURSE_TITLE } from "./firebase-config.js?v=20261106i";
 import {
   esc, renderBlocks, renderExercise, exercisesOf, isAuto, gradeAuto, buildResult, keyText, norm,
   fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, KIND_LABEL, isTeacherChecked, gradeExercise, wireFlashcards, isManual,
   isCorrect, readInput, doneMap, isTranslation, exerciseNumbers, fmtDate, todayISO, answerLabel, r2,
-} from "./common.js?v=20261106h";
-import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261106h";
-import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, feedbackHTML, sleep } from "./writing.js?v=20261106h";
-import "./speaking.js?v=20261106h";
-import { isWritingTask, measure, METRICS, toCSV } from "./progress.js?v=20261106h";
+} from "./common.js?v=20261106i";
+import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261106i";
+import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, feedbackHTML, sleep } from "./writing.js?v=20261106i";
+import "./speaking.js?v=20261106i";
+import { isWritingTask, measure, METRICS, toCSV } from "./progress.js?v=20261106i";
 
 const $ = (s) => document.querySelector(s);
 const ls = {
@@ -342,7 +342,7 @@ async function downloadDocx(unitId, ver, btn) {
   try {
     const d = await loadUnitData(unitId);
     if (!d?.content) throw new Error("This unit has no content yet.");
-    const { exportUnitDocx, saveBlob } = await import("./export-docx.js?v=20261106h");
+    const { exportUnitDocx, saveBlob } = await import("./export-docx.js?v=20261106i");
     const teacher = ver === "teacher";
     const sections = d.content.sections.map((s) => ({ ...s, subtitle: (u.sections || []).find((m) => m.id === s.id)?.subtitle || s.subtitle || "" }));
     const blob = await exportUnitDocx({ courseTitle: COURSE_TITLE, unitNum: unitNum(u), unitTitle: u.title, sections,
@@ -685,10 +685,12 @@ async function loadProgress() {
         if (!skill) continue;
         const it = (ex.items || []).find((x) => !x.plain);
         if (!it) continue;
+        // several answer fields (translations, own sentences): measured as one text, items in order
+        const itemIds = (ex.items || []).filter((x) => !x.plain).map((x) => x.id);
         const own = Array.isArray(ex.vocab) && ex.vocab.length ? ex.vocab : null;
         tasks.push({ key: `${u.id}/${ex.id}`, skill, unitId: u.id, unitNo: unitNum(u), ex, itemId: it.id, num: nums[ex.id] || "",
           title: ex.title || "", prompt: new DOMParser().parseFromString(String(it.text || ex.rubric || "").replace(/<[^>]+>/g, " "), "text/html").body.textContent.replace(/\s+/g, " ").trim(),
-          phrases: own || (skill === "writing" ? unitPhrases : []), phrasesOwn: !!own,
+          phrases: own || unitPhrases, phrasesOwn: !!own, itemIds,
           partnerId: (ex.items || []).find((x) => x.plain)?.id || "" });
       }
     }
@@ -703,11 +705,17 @@ async function loadProgress() {
       const sub = d.data();
       for (const t of tasks) {
         if (t.unitId !== sub.unitId) continue;
-        const text = String(sub.answers?.[t.ex.id]?.[t.itemId] || "").trim();
+        const parts = t.itemIds.map((id) => String(sub.answers?.[t.ex.id]?.[id] || "").trim());
+        const text = parts.filter(Boolean).join("\n");
         if (!text) continue;
         let sp = null;
         if (t.skill === "speaking") { try { sp = JSON.parse(sub.answers?._speech?.[t.ex.id] || "null"); } catch {} }
-        const fb = exrOf[subId(sub.unitId, sub.uid)]?.feedback?.[t.ex.id]?.[t.itemId];
+        const fbAll = exrOf[subId(sub.unitId, sub.uid)]?.feedback?.[t.ex.id];
+        let fb = fbAll?.[t.itemId];
+        if (fbAll && t.itemIds.length > 1) {          // join the feedback of all items the same way as the texts
+          const f = t.itemIds.map((id) => fbAll[id]).filter((x, i) => parts[i]);
+          fb = f.length && f.every(Boolean) ? { text: f.map((x) => String(x.text || "").trim()).join("\n"), issues: f.flatMap((x) => x.issues || []), grammarError: f.some((x) => x.grammarError) } : (f.some(Boolean) ? { text: "", issues: [] } : undefined);
+        }
         rows.push({
           uid: sub.uid, key: t.key, skill: t.skill, text, status: sub.status,
           partner: t.partnerId ? String(sub.answers?.[t.ex.id]?.[t.partnerId] || "").trim() : "",
