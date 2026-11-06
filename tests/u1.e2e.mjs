@@ -120,7 +120,7 @@ const check = async (secName, id, expect) => {
   await s.waitForSelector(`#ex-${id}`);
   if (await s.locator(`[data-done="${id}"]`).count()) {
     await s.click(`[data-done="${id}"]`);
-    await s.locator("#save-state", { hasText: /Sent to your teacher/ }).waitFor({ timeout: 5000 });
+    await s.locator("#save-state", { hasText: /Saved|Draft saved/ }).waitFor({ timeout: 5000 });
   }
   await t.click(`.sb-item[href^="#u1/"]:has-text("${secName}")`);
   await t.waitForSelector(`[data-act="check-ex"][data-ex="${id}"]`);

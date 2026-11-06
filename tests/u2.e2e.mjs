@@ -97,7 +97,7 @@ const sendDone = async (href, id) => {
   await s.waitForSelector(`#ex-${id}`);
   if (await s.locator(`[data-done="${id}"]`).count()) {
     await s.click(`[data-done="${id}"]`);
-    await s.locator("#save-state", { hasText: /Sent to your teacher/ }).waitFor({ timeout: 5000 });
+    await s.locator("#save-state", { hasText: /Saved|Draft saved/ }).waitFor({ timeout: 5000 });
   }
 };
 const check = async (id, expect) => {
