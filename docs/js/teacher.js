@@ -4,17 +4,17 @@ import {
   auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, orderBy,
   writeBatch, arrayUnion, arrayRemove, serverTimestamp, deleteField,
-} from "./fb.js?v=20261106i";
-import { COURSE_TITLE } from "./firebase-config.js?v=20261106i";
+} from "./fb.js?v=20261112a";
+import { COURSE_TITLE } from "./firebase-config.js?v=20261112a";
 import {
   esc, renderBlocks, renderExercise, exercisesOf, isAuto, gradeAuto, buildResult, keyText, norm,
   fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, KIND_LABEL, isTeacherChecked, gradeExercise, wireFlashcards, isManual,
   isCorrect, readInput, doneMap, isTranslation, exerciseNumbers, fmtDate, todayISO, answerLabel, r2,
-} from "./common.js?v=20261106i";
-import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261106i";
-import { loadVocab, grammarCheck, vocabProfile, unitVocabulary, feedbackHTML, sleep } from "./writing.js?v=20261106i";
-import "./speaking.js?v=20261106i";
-import { isWritingTask, measure, METRICS, toCSV } from "./progress.js?v=20261106i";
+} from "./common.js?v=20261112a";
+import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261112a";
+import { loadVocab, checkGrammar, vocabProfile, unitVocabulary, feedbackHTML, sleep, findGrammar, textLevel } from "./writing.js?v=20261112a";
+import "./speaking.js?v=20261112a";
+import { isWritingTask, measure, METRICS, toCSV } from "./progress.js?v=20261112a";
 
 const $ = (s) => document.querySelector(s);
 const ls = {
@@ -342,7 +342,7 @@ async function downloadDocx(unitId, ver, btn) {
   try {
     const d = await loadUnitData(unitId);
     if (!d?.content) throw new Error("This unit has no content yet.");
-    const { exportUnitDocx, saveBlob } = await import("./export-docx.js?v=20261106i");
+    const { exportUnitDocx, saveBlob } = await import("./export-docx.js?v=20261112a");
     const teacher = ver === "teacher";
     const sections = d.content.sections.map((s) => ({ ...s, subtitle: (u.sections || []).find((m) => m.id === s.id)?.subtitle || s.subtitle || "" }));
     const blob = await exportUnitDocx({ courseTitle: COURSE_TITLE, unitNum: unitNum(u), unitTitle: u.title, sections,
@@ -613,15 +613,21 @@ function writingBar(u, ex, g) {
   </div>`;
 }
 
+// The unit's grammar structures (course file: "grammar" on the unit, or on an exercise to replace it)
+function unitGrammar(content, ex) {
+  return ex?.grammar || content?.grammar || [];
+}
+
 async function checkWriting(gid, unitId, exId) {
   await guard(async () => {
     const { content } = await loadUnitData(unitId, true);
     const ex = exercisesOf(content).find((e) => e.id === exId);
     const subs = (await getDocs(query(collection(db, "submissions"), where("groupId", "==", gid), where("unitId", "==", unitId)))).docs.map((d) => d.data())
       .filter((s) => Object.values(s.answers?.[exId] || {}).some((v) => String(v).trim()));
-    if (!confirm(`Check the writing in “${ex.title}”?\nStudents with answers: ${subs.length}.\nThe texts are sent to LanguageTool for the grammar check (about 3 seconds per student). Students will see the feedback and can correct their texts.`)) return;
+    if (!confirm(`Check the writing in “${ex.title}”?\nStudents with answers: ${subs.length}.\nThe texts are sent to LanguageTool for the grammar check (about 3 seconds per student) and checked on this computer by Harper and the course rules. Students will see the feedback and can correct their texts.`)) return;
     const V = await loadVocab();
     const phrases = unitVocabulary(content);
+    const gIds = unitGrammar(content, ex);
     let n = 0, ltFailed = 0;
     for (const s of subs) {
       n++;
@@ -629,14 +635,17 @@ async function checkWriting(gid, unitId, exId) {
       if (prog) prog.textContent = `Checking ${n} of ${subs.length}…`;
       const plainIds = new Set((ex.items || []).filter((it) => it.plain).map((it) => it.id));
       const texts = Object.fromEntries(Object.entries(s.answers[exId] || {}).filter(([id]) => !plainIds.has(id)));
-      let issues = {}, grammarError = false;
-      try { issues = await grammarCheck(texts); } catch (e) { console.warn(e); grammarError = true; ltFailed++; }
+      const { issues, ltError, harperError } = await checkGrammar(texts);
+      const grammarError = false;
+      if (ltError) ltFailed++;
       const fb = {};
       for (const it of ex.items || []) {
         if (it.plain) continue;                     // a partner's name: nothing to check
         const text = String(texts[it.id] || "");
         if (!text.trim()) continue;
-        fb[it.id] = { text, issues: issues[it.id] || [], grammarError, vocab: vocabProfile(text, V, phrases), unitTotal: phrases.length };
+        const vocab = vocabProfile(text, V, phrases);
+        fb[it.id] = { text, issues: issues[it.id] || [], grammarError, ltError, harperError, vocab, unitTotal: phrases.length,
+          level: textLevel(vocab.counts), grammar: findGrammar(text, gIds) };
         // a transcribed speaking task: the measurements of the speech (length, speed, pauses) go with the feedback
         if (ex.transcript && it === ex.items[0] && s.answers?._speech?.[exId]) { try { fb[it.id].speech = JSON.parse(s.answers._speech[exId]); } catch {} }
       }
@@ -644,10 +653,10 @@ async function checkWriting(gid, unitId, exId) {
         uid: s.uid, groupId: gid, unitId,
         feedback: { [exId]: fb }, feedbackAt: { [exId]: serverTimestamp() },
       }, { merge: true });
-      if (n < subs.length && !grammarError) await sleep(3200);   // LanguageTool: at most 20 requests a minute
+      if (n < subs.length && !ltError) await sleep(3200);   // LanguageTool: at most 20 requests a minute
     }
     await updateDoc(doc(db, "groups", gid), { [`feedbackEx.${unitId}`]: arrayUnion(exId) });
-    toast(ltFailed ? `Done. The grammar check was not available for ${ltFailed} of ${subs.length}; the vocabulary check worked.` : `Done: ${subs.length} texts checked. Students can see the feedback now.`, 7000);
+    toast(ltFailed ? `Done. LanguageTool was not available for ${ltFailed} of ${subs.length}; Harper, the course rules and the vocabulary check worked.` : `Done: ${subs.length} texts checked. Students can see the feedback now.`, 7000);
   });
 }
 
@@ -690,7 +699,7 @@ async function loadProgress() {
         const own = Array.isArray(ex.vocab) && ex.vocab.length ? ex.vocab : null;
         tasks.push({ key: `${u.id}/${ex.id}`, skill, unitId: u.id, unitNo: unitNum(u), ex, itemId: it.id, num: nums[ex.id] || "",
           title: ex.title || "", prompt: new DOMParser().parseFromString(String(it.text || ex.rubric || "").replace(/<[^>]+>/g, " "), "text/html").body.textContent.replace(/\s+/g, " ").trim(),
-          phrases: own || unitPhrases, phrasesOwn: !!own, itemIds,
+          phrases: own || unitPhrases, phrasesOwn: !!own, itemIds, grammar: unitGrammar(content, ex),
           partnerId: (ex.items || []).find((x) => x.plain)?.id || "" });
       }
     }
@@ -720,7 +729,7 @@ async function loadProgress() {
           uid: sub.uid, key: t.key, skill: t.skill, text, status: sub.status,
           partner: t.partnerId ? String(sub.answers?.[t.ex.id]?.[t.partnerId] || "").trim() : "",
           at: sp?.at || sub.updatedAt?.toMillis?.() || 0, atExact: !!sp?.at,
-          m: measure(text, V, t.phrases, fb, sp),
+          m: measure(text, V, t.phrases, fb, sp, t.grammar),
         });
       }
     }
@@ -807,7 +816,8 @@ function viewProgress(skill) {
 
   const help = `<details class="box"><summary><b>How to read the figures</b></summary><ul>
     ${isSp ? `<li><b>Spoke</b> – time with speech in the recording (of the whole recording); <b>words per minute</b> – speed while speaking; <b>pauses</b> – silences longer than one second, per minute of recording.</li>` : `<li><b>Words per sentence</b> and <b>subordinating words</b> (<i>because, although, which, who, when, if…</i> per 100 words) show how complex the sentences are.</li>`}
-    <li><b>Errors per 100 words</b> – LanguageTool issues except punctuation, spelling of spaces and style. They appear after you click <b>Check the writing now</b> above the exercise, and only while the text is the same as at the check.${isSp ? " The speech program sometimes corrects students’ mistakes, so the real number is higher; compare students with themselves, not with each other." : ""}</li>
+    <li><b>Errors per 100 words</b> – issues found by the course rules, LanguageTool and Harper, except punctuation, spelling of spaces and style. They appear after you click <b>Check the writing now</b> above the exercise, and only while the text is the same as at the check.${isSp ? " The speech program sometimes corrects students’ mistakes, so the real number is higher; compare students with themselves, not with each other." : ""}</li>
+    <li><b>Unit grammar</b> – how many times the student used the structures of the unit (for example the passive and infinitive forms), found automatically from the words of the text; the list is in the detail panel. It is approximate: compare a student with themselves over time.</li>
     <li><b>MATTR-50</b> – lexical diversity: the share of different words in every 50-word window (Covington &amp; McFall, 2010); it does not depend on the length of the text.</li>
     <li><b>B2+ words</b> – the share of words from the higher levels of the word lists (CEFR-J A1–B2, Octanove C1–C2).</li>
     <li><b>${isSp ? "Task phrases" : "Unit phrases"}</b> – ${isSp ? "phrases from the exercise list that were used (passing the turn, building on an idea, disagreeing…)" : "words and phrases of the unit vocabulary that were used"}.</li>
@@ -840,7 +850,9 @@ function viewProgress(skill) {
           : [["Words per sentence", m.sentLen]]),
         ["Subordinating words / 100", m.subPer100], ["MATTR-50", fmtV(m.mattr, "mattr")], ["B2+ words", m.b2plus + "%"], ["C1+ words", m.c1plus + "%"],
         [isSp ? "Task phrases" : "Unit phrases", `${m.phrases}${t.phrasesOwn ? ` of ${t.phrases.length}` : ""}${m.phraseList.length ? ` (${esc(m.phraseList.join(", "))})` : ""}`],
-        ["LanguageTool", m.ltChecked ? `${m.ltAll} issues, ${m.ltGrammar} grammar · ${m.errPer100} errors per 100 words` : m.ltStale ? "the text was changed after the check" : "not checked yet"]];
+        ["Unit grammar", m.gramOn ? (m.gramUses ? `${m.gramUses} (${m.gramTypes} different): ${esc(m.gramList.join(", "))}` : "none") : "no grammar set for this unit"],
+        ["Vocabulary level", m.level ? `${m.level} (95% of the listed words)` : "–"],
+        ["Grammar check", m.ltChecked ? `${m.ltAll} issues, ${m.ltGrammar} grammar · ${m.errPer100} errors per 100 words` : m.ltStale ? "the text was changed after the check" : "not checked yet"]];
       detail = `<div class="box prog-detail" id="prog-detail"><div class="row" style="justify-content:space-between"><b>${esc(st?.name || "")} · T${tasks.indexOf(t) + 1} · ${esc(t.num)} ${esc(t.title)}</b>
         <button class="btn small" data-act="prog-close">Close</button></div>
         <p class="muted">${esc(t.prompt)}${r.partner ? ` · pair with ${esc(r.partner)}` : ""}</p>
@@ -889,13 +901,14 @@ function viewProgress(skill) {
       + (isSp && !!ta.ex.pair !== !!tb.ex.pair ? `<p class="muted">One of them was made alone and the other in a pair, so compare with care.</p>` : "");
   };
   const cols = isSp
-    ? ["Exercise", "Date", "Recorded", "Spoke", "Words", "Words per minute", "Pauses", "Errors per 100 words", "Task phrases", "B2+ words", "MATTR"]
-    : ["Exercise", "Date", "Words", "Words per sentence", "Subordinating / 100", "Errors per 100 words", "Unit phrases", "B2+ words", "MATTR"];
+    ? ["Exercise", "Date", "Recorded", "Spoke", "Words", "Words per minute", "Pauses", "Errors per 100 words", "Task phrases", "Unit grammar", "B2+ words", "MATTR"]
+    : ["Exercise", "Date", "Words", "Words per sentence", "Subordinating / 100", "Errors per 100 words", "Unit phrases", "Unit grammar", "B2+ words", "MATTR"];
   const errCell = (m) => (m.errPer100 !== null ? n1(m.errPer100) : `<span class="muted">${m.ltStale ? "text changed after the check" : "not checked"}</span>`);
   const row = (r) => {
     const { t } = taskOf[r.key], m = r.m;
     const date = r.at ? esc((r.atExact ? "" : "about ") + new Date(r.at).toLocaleDateString("ru-RU")) : "—";
-    const ph = `<td title="${esc(m.phraseList.join(", "))}">${t.phrasesOwn ? `${m.phrases} of ${t.phrases.length}` : t.phrases.length ? m.phrases : "—"}</td>`;
+    const ph = `<td title="${esc(m.phraseList.join(", "))}">${t.phrasesOwn ? `${m.phrases} of ${t.phrases.length}` : t.phrases.length ? m.phrases : "—"}</td>`
+      + `<td title="${esc(m.gramList.join(", "))}">${m.gramOn ? `${m.gramUses}${m.gramUses ? ` <span class="muted">(${m.gramTypes} kinds)</span>` : ""}` : "—"}</td>`;
     const cells = isSp
       ? `<td>${date}</td><td>${t.ex.pair ? `pair${r.partner ? ` with ${esc(r.partner)}` : ""}` : "alone"}</td><td>${m.total ? mmss(m.speech) + " / " + mmss(m.total) : "—"}</td><td>${m.words}</td><td>${m.wpm || "—"}</td>
          <td>${m.pauses !== null ? `${m.pauses} <span class="muted">(${fmtV(m.pausesPerMin)}/min)</span>` : "—"}</td><td>${errCell(m)}</td>${ph}<td>${Math.round(m.b2plus)}%</td><td>${fmtV(m.mattr, "mattr")}</td>`
@@ -932,6 +945,7 @@ function progressCSV() {
       task_title: t.title, setting: { class: "in-class", home: "home" }[g?.plan?.[t.unitId]?.[t.ex.id]?.as] || "", pair: t.ex.pair ? "yes" : "no", partner: r.partner, date: r.at ? new Date(r.at).toISOString().slice(0, 10) : "", submitted: r.status === "submitted" ? "yes" : "no",
       words: m.words, speech_s: m.speech || "", recording_s: m.total || "", wpm: m.wpm ?? "", pauses: m.pauses ?? "", pauses_per_min: m.pausesPerMin ?? "", longest_pause_s: m.longest ?? "",
       ttr: m.ttr, mattr50: m.mattr, b2plus_pct: m.b2plus, c1plus_pct: m.c1plus, phrases: m.phrases, phrase_list: m.phraseList.join("; "),
+      grammar_uses: m.gramUses ?? "", grammar_per100: m.gramPer100 ?? "", grammar_types: m.gramTypes ?? "", grammar_list: m.gramList.join("; "), vocab_level: m.level,
       words_per_sentence: m.sentLen, subordinators_per100: m.subPer100, lt_checked: m.ltChecked ? "yes" : "no", lt_issues_all: m.ltAll ?? "", lt_grammar: m.ltGrammar ?? "",
       errors_per100: m.errPer100 ?? "", text: r.text, text_at_check: m.checkedText };
   });
@@ -1375,7 +1389,7 @@ function splitUnit(u) {
     }
     return { id: s.id, title: s.title, ...(s.subtitle ? { subtitle: s.subtitle } : {}), blocks };
   });
-  return { meta, content: { sections }, tests, keys: { exercises: keys, notes, tests: testKeys } };
+  return { meta, content: { sections, ...(Array.isArray(u.grammar) ? { grammar: u.grammar } : {}) }, tests, keys: { exercises: keys, notes, tests: testKeys } };
 }
 
 function setImportStatus(html) {

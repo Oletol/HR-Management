@@ -644,3 +644,8 @@ textarea.open-answer.transcript{background:#fbfaf6;cursor:default}
 .spk-card .set-tag,.prog-tasks .set-tag{color:#fff;font-size:10px}
 .tbl-wrap{overflow-x:auto;max-width:100%}
 .tbl-wrap table.t{min-width:max-content}
+.wfb-issues .lt-src{color:var(--mut);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;margin-left:4px}
+.wfb-gr{margin:6px 0;font-size:14px}
+.wfb-gr ul{margin:4px 0 4px;padding-left:20px}
+.wfb-gr li{margin-bottom:2px}
+.wfb-gr p{margin:2px 0;font-size:13px}
