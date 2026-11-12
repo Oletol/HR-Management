@@ -4,15 +4,15 @@ import {
   auth, db, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
   sendPasswordResetEmail, signOut, doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, orderBy,
   serverTimestamp,
-} from "./fb.js?v=20261112a";
-import { COURSE_TITLE } from "./firebase-config.js?v=20261112a";
+} from "./fb.js?v=20261112b";
+import { COURSE_TITLE } from "./firebase-config.js?v=20261112b";
 import {
   esc, renderBlocks, readInput, fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, exercisesOf, isAuto,
-  isTeacherChecked, wireFlashcards, countWords, DONE, doneMap, exerciseNumbers, planTag,
-} from "./common.js?v=20261112a";
-import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261112a";
-import { feedbackHTML } from "./writing.js?v=20261112a";
-import "./speaking.js?v=20261112a";
+  isTeacherChecked, wireFlashcards, countWords, DONE, doneMap, exerciseNumbers, planTag, studentItems,
+} from "./common.js?v=20261112b";
+import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261112b";
+import { feedbackHTML } from "./writing.js?v=20261112b";
+import "./speaking.js?v=20261112b";
 
 const $ = (s) => document.querySelector(s);
 const S = {
@@ -293,7 +293,8 @@ function renderMain() {
         factor,
         cls: isDone || exDone ? "is-done" : "",
         after: readOnly || exDone ? "" : doneFootHTML(ex, isDone, sub.answers?.[ex.id]),
-        auto: res ? (isAuto(ex) ? res.auto?.[ex.id] || {} : null) : exDone ? S.exr[unit.id]?.items?.[ex.id] || {} : undefined,
+        // results checked before the rule came in may still hold whole-sentence keys: they are not shown
+        auto: res ? (isAuto(ex) ? studentItems(ex, res.auto?.[ex.id] || {}) : null) : exDone ? studentItems(ex, S.exr[unit.id]?.items?.[ex.id] || {}) : undefined,
         manual: res?.manual?.[ex.id],
         showPending: !!res,
         tag: ex.check === "teacher" && !res ? (exDone ? "Checked" : fb ? "Feedback ready – you can correct your text" : "Checked by your teacher") : "",
@@ -677,7 +678,7 @@ function renderTest(key) {
     + renderBlocks(c.exercises || [], (ex) => ({
       answers: (S.tdraft[key] || a.answers || {})[ex.id] || {},
       readOnly,
-      auto: res ? res.items?.[ex.id] || {} : undefined,
+      auto: res ? studentItems(ex, res.items?.[ex.id] || {}) : undefined,
     }))
     + (readOnly ? "" : `<div class="row" style="margin-top:24px"><button class="btn primary" id="submit-test">Submit the test</button></div>`);
   $("#submit-test")?.addEventListener("click", () => submitTest(key, true));

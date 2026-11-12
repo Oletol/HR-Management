@@ -2,9 +2,9 @@
 // Octanove C1–C2, Google 10,000 frequency list as a fallback) and use of the unit's vocabulary.
 // The check runs in the teacher's browser when the teacher clicks the button; the result is
 // saved for each student in exerciseResults and shown under their text.
-import { esc } from "./common.js?v=20261112a";
-import { metricsLine } from "./transcribe.js?v=20261112a";
-import { learnerIssues, findGrammar, textLevel } from "./grammar.js?v=20261112a";
+import { esc } from "./common.js?v=20261112b";
+import { metricsLine } from "./transcribe.js?v=20261112b";
+import { learnerIssues, findGrammar, textLevel, STRUCTURES } from "./grammar.js?v=20261112b";
 
 const LT_URL = "https://api.languagetool.org/v2/check";
 const LT_LANG = "en-GB";
@@ -198,7 +198,17 @@ export { findGrammar, textLevel };
 // ------------------------------------------------------------------ feedback shown under the text
 export function wordCount(text) { return tokens(text).length; }
 
-export function feedbackHTML(fb, { checkedAt } = {}) {
+// the unit grammar as the AI saw it: structures used correctly (green) and wrongly (red, with a better form)
+function targetHTML(fb) {
+  if (fb.engine !== "ai" || !(fb.target || []).length) return "";
+  const by = {};
+  for (const t of fb.target) (by[t.id] ??= []).push(t);
+  const q = (t) => `<span class="${t.ok === false ? "tg-bad" : "tg-ok"}">“${esc(t.quote)}”${t.ok === false && t.fix ? ` <span class="fix">better: “${esc(t.fix)}”</span>` : ""}</span>`;
+  return `<div class="wfb-g"><div class="wfb-gh">Unit grammar in your ${fb.speech ? "answer" : "text"} (checked by AI)</div>
+    <ul class="wfb-gl">${Object.entries(by).map(([id, l]) => `<li><b>${esc(STRUCTURES[id]?.label || id)}</b> <span class="muted">×${l.length}</span>: ${l.slice(0, 6).map(q).join(", ")}</li>`).join("")}</ul></div>`;
+}
+
+export function feedbackHTML(fb, { checkedAt, teacher = false } = {}) {
   if (!fb) return "";
   const text = String(fb.text || "");
   // highlighted text
@@ -210,7 +220,7 @@ export function feedbackHTML(fb, { checkedAt } = {}) {
     pos = is.offset + is.length;
   }
   html += esc(text.slice(pos));
-  const SRC = { lt: "LanguageTool", harper: "Harper", course: "course rule" };
+  const SRC = { lt: "LanguageTool", harper: "Harper", course: "course rule", ai: "AI" };
   const issues = (fb.issues || []).map((is) => `<li><b>${esc(text.substr(is.offset, is.length))}</b> – ${esc(is.message)}${is.fix?.length ? ` <span class="fix">Try: ${is.fix.map((f) => `“${esc(f)}”`).join(", ")}</span>` : ""}${is.src ? ` <small class="lt-src">${SRC[is.src] || ""}</small>` : ""}</li>`).join("");
   const gr = fb.grammar || [];
   const grUsed = gr.filter((g) => g.count), grNot = gr.filter((g) => !g.count);
@@ -219,10 +229,13 @@ export function feedbackHTML(fb, { checkedAt } = {}) {
   const bars = v ? LEVELS.map((l) => `<span class="lvchip lv-${l}" title="${l}: ${v.counts[l]} words">${l} <b>${Math.round((100 * v.counts[l]) / total)}%</b></span>`).join("") : "";
   return `<div class="wfb">
     <div class="wfb-h">Feedback on your ${fb.speech ? "speaking" : "text"}${checkedAt ? ` <span class="muted">· checked ${esc(checkedAt)}</span>` : ""}</div>
+    ${fb.comment ? `<p class="wfb-comment">${esc(fb.comment)}</p>` : ""}
+    ${teacher && fb.aiLevel ? `<p class="wfb-line"><b>Estimated level (AI, for the teacher):</b> ${esc(fb.aiLevel)}</p>` : ""}
     ${fb.grammarError ? `<p class="muted">The grammar check was not available this time.</p>` : fb.ltError ? `<p class="muted">LanguageTool was not available this time; the text was checked by the course rules${fb.harperError ? "" : " and Harper"}.</p>` : ""}
     ${fb.speech ? `<p class="wfb-line"><b>How you spoke:</b> ${esc(metricsLine(fb.speech))}</p><p class="wfb-line muted">The text was written by a computer from your recording. It can contain the computer’s mistakes, and it sometimes corrects a mistake you made, so listen to your recording too.</p>` : ""}
     <div class="wfb-text">${html}</div>
-    ${issues ? `<ul class="wfb-issues">${issues}</ul>` : fb.grammarError ? "" : `<p class="wfb-ok">No grammar or spelling problems were found.</p>`}
+    ${issues ? `<ul class="wfb-issues">${issues}</ul>` : fb.grammarError ? "" : `<p class="wfb-ok">No grammar ${fb.speech ? "" : "or spelling "}problems were found.</p>`}
+    ${targetHTML(fb)}
     ${v ? `<div class="wfb-v"><span class="muted">${v.words} words</span> ${bars}</div>
       ${v.high.length ? `<p class="wfb-line"><b>Words at B2 and above:</b> ${v.high.map((x) => `${esc(x.w)} <small>${x.l}</small>`).join(", ")}</p>` : ""}
       ${fb.level ? `<p class="wfb-line"><b>Vocabulary level:</b> ${esc(fb.level)} <span class="muted">(95% of the listed words are at this level or below)</span></p>` : ""}
@@ -230,6 +243,7 @@ export function feedbackHTML(fb, { checkedAt } = {}) {
       ${gr.length ? `<div class="wfb-gr"><b>Unit grammar used:</b> ${grUsed.length ? `<ul>${grUsed.map((g) => `<li>${esc(g.label)} <b>${g.count}</b>: <i>${g.examples.map(esc).join(" · ")}</i></li>`).join("")}</ul>` : " none yet"}
         ${grNot.length ? `<p class="muted">You could also try: ${grNot.slice(0, 4).map((g) => esc(g.label.replace(/ \(.*$/, ""))).join(" · ")}</p>` : ""}</div>` : ""}
       ${v.offList.length ? `<p class="wfb-line muted">Not in the word lists (names, rare words or misspellings): ${v.offList.map(esc).join(", ")}</p>` : ""}` : ""}
-    <p class="wfb-src">Grammar suggestions by <a href="https://languagetool.org" target="_blank">LanguageTool</a>, <a href="https://writewithharper.com" target="_blank">Harper</a> and the course rules · unit grammar found automatically (approximate) · vocabulary levels from the CEFR-J Wordlist and the Octanove Vocabulary Profile</p>
+    <p class="wfb-src">${fb.engine === "ai" ? `Grammar feedback written with the help of AI${fb.engineName ? ` (${esc(fb.engineName)})` : ""} and the course rules: it can be wrong, so ask your teacher if something is unclear`
+      : `Grammar suggestions by <a href="https://languagetool.org" target="_blank">LanguageTool</a>, <a href="https://writewithharper.com" target="_blank">Harper</a> and the course rules`} · unit grammar found automatically (approximate) · vocabulary levels from the CEFR-J Wordlist and the Octanove Vocabulary Profile</p>
   </div>`;
 }

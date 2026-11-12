@@ -1,6 +1,6 @@
 // Общие функции: отрисовка упражнений, автопроверка, подсчёт баллов.
 // Используются и студенческой, и преподавательской страницей.
-import { metricsLine } from "./transcribe.js?v=20261112a";
+import { metricsLine } from "./transcribe.js?v=20261112b";
 
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -134,8 +134,9 @@ export function gradeExercise(ex, answers, keys) {
 export const r2 = (x) => Math.round(x * 100) / 100;
 export function buildResult({ sub, content, keys, manual = {}, showCorrect = true, factors = {} }) {
   const auto = gradeAuto(content, sub.answers, keys);
-  if (!showCorrect)
-    for (const ex of Object.values(auto.items)) for (const r of Object.values(ex)) delete r.correct;
+  // the correct answers go to the students only when the teacher allows it, and only for gap fills, multiple choice and matching
+  for (const ex of exercisesOf(content))
+    if (auto.items[ex.id]) auto.items[ex.id] = studentItems(ex, auto.items[ex.id], showCorrect);
   let aScore = 0;
   for (const [exId, items] of Object.entries(auto.items))
     aScore += Object.values(items).filter((r) => r.ok).length * (factors[exId] ?? 1);
@@ -169,6 +170,30 @@ export const doneMap = (answers) => (answers && typeof answers[DONE] === "object
 
 // translation exercises are left out of the live statistics
 export const isTranslation = (ex) => ex.stats === false || /translat/i.test(`${ex.title || ""} ${ex.rubric || ""}`.replace(/<[^>]*>/g, ""));
+
+// ------------------------------------------------------------------ which keys the students may see
+// After a check students see the correct answer only in gap fills (a word or a form, dropdowns included), multiple choice
+// and matching. Where the student writes or rewrites a whole sentence (translations, key word transformations,
+// paraphrases, corrected sentences, open answers, full-sentence gaps) the key is never shown: there are many good answers,
+// and one model answer would be taken as the only right one. "showKey": true or false in course.json decides for one exercise.
+const REWRITE = /translat|paraphras|rephras|re-?writ|reword|transform|mean(s|ing)? the same|second sentence|in other words|full sentence|whole sentence|correct the (sentence|mistake)/i;
+export const isRewrite = (ex) => ex?.kind === "open" || !!ex?.wide || isTranslation(ex || {}) || REWRITE.test(`${ex?.title || ""} ${ex?.rubric || ""}`.replace(/<[^>]*>/g, ""));
+export function keyForStudents(ex) {
+  if (ex?.showKey === true) return true;
+  if (ex?.showKey === false) return false;
+  return ["gap", "mcq", "match"].includes(ex?.kind) && !isRewrite(ex);
+}
+// a key of six words or more is a sentence, not a word: it is not shown either
+const longKey = (k) => String(k || "").trim().split(/\s+/).length >= 6;
+// remove the correct answers from a checked exercise ({itemId: {given, ok, correct}}) when the students may not see them
+export function studentItems(ex, items, showCorrect = true) {
+  if (!items) return items;
+  const all = showCorrect && keyForStudents(ex);
+  // written as "" (not deleted): exerciseResults are saved with merge, so a key from an earlier check would otherwise stay
+  // (a long option chosen from a list – a dropdown or multiple choice – is still shown: the student chose it, not wrote it)
+  const typed = (id) => ex?.kind === "gap" && !(ex.items || []).find((it) => it.id === id)?.choices;
+  return Object.fromEntries(Object.entries(items).map(([id, r]) => [id, all && !(ex?.showKey !== true && typed(id) && longKey(r?.correct)) ? r : { ...(r || {}), correct: "" }]));
+}
 
 // numbers of the exercises as the book shows them: {exId: "1.4.2"}
 export function exerciseNumbers(content, unitN) {

@@ -4,17 +4,19 @@ import {
   auth, db, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, signOut,
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, orderBy,
   writeBatch, arrayUnion, arrayRemove, serverTimestamp, deleteField,
-} from "./fb.js?v=20261112a";
-import { COURSE_TITLE } from "./firebase-config.js?v=20261112a";
+} from "./fb.js?v=20261112b";
+import { COURSE_TITLE } from "./firebase-config.js?v=20261112b";
 import {
   esc, renderBlocks, renderExercise, exercisesOf, isAuto, gradeAuto, buildResult, keyText, norm,
   fmtTime, friendlyError, authFormHTML, wireAuthForm, subId, KIND_LABEL, isTeacherChecked, gradeExercise, wireFlashcards, isManual,
-  isCorrect, readInput, doneMap, isTranslation, exerciseNumbers, fmtDate, todayISO, answerLabel, r2,
-} from "./common.js?v=20261112a";
-import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261112a";
-import { loadVocab, checkGrammar, vocabProfile, unitVocabulary, feedbackHTML, sleep, findGrammar, textLevel } from "./writing.js?v=20261112a";
-import "./speaking.js?v=20261112a";
-import { isWritingTask, measure, METRICS, toCSV } from "./progress.js?v=20261112a";
+  isCorrect, readInput, doneMap, isTranslation, exerciseNumbers, fmtDate, todayISO, answerLabel, r2, keyForStudents, studentItems,
+} from "./common.js?v=20261112b";
+import { initShell, renderUnitNav, wireUnitNav } from "./shell.js?v=20261112b";
+import { loadVocab, checkGrammar, vocabProfile, unitVocabulary, feedbackHTML, sleep, findGrammar, textLevel } from "./writing.js?v=20261112b";
+import { learnerIssues, expandGrammar, STRUCTURES } from "./grammar.js?v=20261112b";
+import { aiCheck, aiReady, aiSettings, saveAiSettings, endpoint, PROVIDERS, listModels, testAi } from "./ai-check.js?v=20261112b";
+import "./speaking.js?v=20261112b";
+import { isWritingTask, measure, METRICS, toCSV } from "./progress.js?v=20261112b";
 
 const $ = (s) => document.querySelector(s);
 const ls = {
@@ -52,6 +54,7 @@ const TOOLS = [
   { id: "journal", icon: "📅", title: "Attendance", sub: "Lesson dates, present and absent" },
   { id: "speaking", icon: "🎙", title: "Speaking progress", sub: "Recordings as text: figures, trends, texts" },
   { id: "writing", icon: "✍", title: "Writing progress", sub: "Letters and essays: figures, trends, texts" },
+  { id: "checker", icon: "🔎", title: "Grammar checker", sub: "LanguageTool or AI (Groq), the key" },
   { id: "groups", icon: "👥", title: "Groups & students", sub: "Group codes, moving and removing students" },
   { id: "content", icon: "📦", title: "Course content", sub: "Import units and keys" },
 ];
@@ -228,7 +231,7 @@ function render(force = false) {
   if (r.unit) { $("#view").innerHTML = viewUnit(r); T.unitViewKey = unitViewKey(r); return; }
   const tool = TOOLS.find((t) => t.id === r.tool);
   $("#crumb").innerHTML = `<b>Teaching tools</b> &middot; ${tool.title}`;
-  const views = { access: viewAccess, works: viewWorks, tests: viewTests, stats: viewStats, content: viewContent, groups: viewGroups, journal: viewJournal, speaking: () => viewProgress("speaking"), writing: () => viewProgress("writing") };
+  const views = { access: viewAccess, works: viewWorks, tests: viewTests, stats: viewStats, content: viewContent, groups: viewGroups, journal: viewJournal, checker: viewChecker, speaking: () => viewProgress("speaking"), writing: () => viewProgress("writing") };
   $("#view").innerHTML = views[r.tool]();
 }
 
@@ -284,7 +287,7 @@ function viewUnit(r) {
           manual: vres?.manual?.[ex.id],
           tag: done ? "Done ✓" : vs && Object.values(ans).some((v) => String(v).trim()) ? "Started, not marked Done" : "",
           before: g ? toolsBar(u, ex, g, st) : "",
-          itemExtra: fbx ? (itemId) => feedbackHTML(fbx[itemId], { checkedAt: fmtTime(vexr.feedbackAt?.[ex.id]) }) : null,
+          itemExtra: fbx ? (itemId) => feedbackHTML(fbx[itemId], { checkedAt: fmtTime(vexr.feedbackAt?.[ex.id]), teacher: true }) : null,
         };
       }
       return {
@@ -342,7 +345,7 @@ async function downloadDocx(unitId, ver, btn) {
   try {
     const d = await loadUnitData(unitId);
     if (!d?.content) throw new Error("This unit has no content yet.");
-    const { exportUnitDocx, saveBlob } = await import("./export-docx.js?v=20261112a");
+    const { exportUnitDocx, saveBlob } = await import("./export-docx.js?v=20261112b");
     const teacher = ver === "teacher";
     const sections = d.content.sections.map((s) => ({ ...s, subtitle: (u.sections || []).find((m) => m.id === s.id)?.subtitle || s.subtitle || "" }));
     const blob = await exportUnitDocx({ courseTitle: COURSE_TITLE, unitNum: unitNum(u), unitTitle: u.title, sections,
@@ -356,7 +359,7 @@ async function downloadDocx(unitId, ver, btn) {
 // Exercises marked "check": "teacher" are checked one at a time, when the teacher decides
 function exerciseBar(u, ex, g) {
   const done = (g.releasedEx?.[u.id] || []).includes(ex.id);
-  return `<div class="tb-row"><span>Group <b>${esc(g.name)}</b>: <span class="pill ${done ? "on" : "off"}">${done ? "checked · results shown" : "not checked yet"}</span></span>
+  return `<div class="tb-row"><span>Group <b>${esc(g.name)}</b>: <span class="pill ${done ? "on" : "off"}">${done ? "checked · results shown" : "not checked yet"}</span>${keyForStudents(ex) ? "" : ` <span class="pill off" title="Students see which answers are right or wrong, but not the correct answer">no correct answer for students</span>`}</span>
     <span class="sp" style="flex:1"></span>
     ${done
       ? `<button class="btn small" data-act="check-ex" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}" title="Check again, e.g. for students who answered later">Re-check</button>
@@ -587,7 +590,7 @@ async function checkExercise(gid, unitId, exId) {
     let batch = writeBatch(db), n = 0;
     for (const s of subs) {
       const r = gradeExercise(ex, s.answers?.[exId], keys[exId]);
-      if (!T.showCorrect) for (const it of Object.values(r.items)) delete it.correct;
+      r.items = studentItems(ex, r.items, T.showCorrect);   // keys only for gap fills, multiple choice and matching
       const f = factorsFor(s.uid, unitId)[exId] ?? 1;      // absent from the lesson: 25% of the points
       batch.set(doc(db, "exerciseResults", subId(unitId, s.uid)), {
         uid: s.uid, groupId: gid, unitId,
@@ -608,7 +611,8 @@ function writingBar(u, ex, g) {
   return `<div class="tb-row"><span>Group <b>${esc(g.name)}</b>: <span class="pill ${done ? "on" : "off"}">${done ? "feedback shown" : "not checked yet"}</span></span>
     <span class="sp" style="flex:1"></span>
     <span id="wcheck-progress" class="muted"></span>
-    <button class="btn small good" data-act="check-writing" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}" ${g.openUnits.includes(u.id) ? "" : "disabled"}>${done ? "Check again" : "Check the writing now"}</button>
+    <button class="btn small good" data-act="check-writing" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}" ${g.openUnits.includes(u.id) ? "" : "disabled title=\"Open the unit for the group first\""}>${done ? "Check again" : ex.transcript ? "Check the speaking now" : "Check the writing now"}</button>
+    <span class="pill ${aiReady() ? "on" : "off"}" title="Change it in Teaching tools, Grammar checker">${aiReady() ? `AI · ${esc(endpoint().name)}` : "LanguageTool"}</span>
     ${done ? `<button class="btn small danger" data-act="hide-writing" data-unit="${esc(u.id)}" data-ex="${esc(ex.id)}">Hide feedback</button>` : ""}
   </div>`;
 }
@@ -624,28 +628,30 @@ async function checkWriting(gid, unitId, exId) {
     const ex = exercisesOf(content).find((e) => e.id === exId);
     const subs = (await getDocs(query(collection(db, "submissions"), where("groupId", "==", gid), where("unitId", "==", unitId)))).docs.map((d) => d.data())
       .filter((s) => Object.values(s.answers?.[exId] || {}).some((v) => String(v).trim()));
-    if (!confirm(`Check the writing in “${ex.title}”?\nStudents with answers: ${subs.length}.\nThe texts are sent to LanguageTool for the grammar check (about 3 seconds per student) and checked on this computer by Harper and the course rules. Students will see the feedback and can correct their texts.`)) return;
+    const ai = aiReady(), eng = endpoint();
+    const gIds = expandGrammar(unitGrammar(content, ex));
+    if (!confirm(`Check the ${ex.transcript ? "speaking" : "writing"} in “${ex.title}”?\nStudents with answers: ${subs.length}.\n`
+      + (ai ? `The texts are checked by AI (${eng.name}, ${eng.model}), about ${Math.round(eng.delay / 1000) + 2} seconds per student, and by the course rules.`
+            : `The texts are sent to LanguageTool for the grammar check (about 3 seconds per student) and checked on this computer by Harper and the course rules.`)
+      + `\n${gIds.length ? `Unit grammar: ${gIds.map((id) => STRUCTURES[id].label).join(", ")}.` : ""}`
+      + `\nStudents will see the feedback and can correct their texts.`)) return;
     const V = await loadVocab();
-    const phrases = unitVocabulary(content);
-    const gIds = unitGrammar(content, ex);
-    let n = 0, ltFailed = 0;
+    // the task's own phrases (the "vocab" list of the exercise), otherwise the vocabulary of the unit
+    const phrases = Array.isArray(ex.vocab) && ex.vocab.length ? ex.vocab : unitVocabulary(content);
+    let n = 0, ltFailed = 0, aiFailed = 0;
     for (const s of subs) {
       n++;
       const prog = document.querySelector("#wcheck-progress");
       if (prog) prog.textContent = `Checking ${n} of ${subs.length}…`;
       const plainIds = new Set((ex.items || []).filter((it) => it.plain).map((it) => it.id));
       const texts = Object.fromEntries(Object.entries(s.answers[exId] || {}).filter(([id]) => !plainIds.has(id)));
-      const { issues, ltError, harperError } = await checkGrammar(texts);
-      const grammarError = false;
-      if (ltError) ltFailed++;
+      const res = await checkTexts(texts, { ex, V, phrases, gIds });
+      if (res.aiFailed) aiFailed++;
+      if (res.ltFailed) ltFailed++;
       const fb = {};
       for (const it of ex.items || []) {
-        if (it.plain) continue;                     // a partner's name: nothing to check
-        const text = String(texts[it.id] || "");
-        if (!text.trim()) continue;
-        const vocab = vocabProfile(text, V, phrases);
-        fb[it.id] = { text, issues: issues[it.id] || [], grammarError, ltError, harperError, vocab, unitTotal: phrases.length,
-          level: textLevel(vocab.counts), grammar: findGrammar(text, gIds) };
+        if (it.plain || !res.items[it.id]) continue;     // a partner's name: nothing to check
+        fb[it.id] = res.items[it.id];
         // a transcribed speaking task: the measurements of the speech (length, speed, pauses) go with the feedback
         if (ex.transcript && it === ex.items[0] && s.answers?._speech?.[exId]) { try { fb[it.id].speech = JSON.parse(s.answers._speech[exId]); } catch {} }
       }
@@ -653,11 +659,130 @@ async function checkWriting(gid, unitId, exId) {
         uid: s.uid, groupId: gid, unitId,
         feedback: { [exId]: fb }, feedbackAt: { [exId]: serverTimestamp() },
       }, { merge: true });
-      if (n < subs.length && !ltError) await sleep(3200);   // LanguageTool: at most 20 requests a minute
+      // the free services allow only a few requests a minute
+      if (n < subs.length) await sleep(res.engine === "ai" ? eng.delay : res.ltFailed ? 0 : 3200);
     }
     await updateDoc(doc(db, "groups", gid), { [`feedbackEx.${unitId}`]: arrayUnion(exId) });
-    toast(ltFailed ? `Done. LanguageTool was not available for ${ltFailed} of ${subs.length}; Harper, the course rules and the vocabulary check worked.` : `Done: ${subs.length} texts checked. Students can see the feedback now.`, 7000);
+    toast((aiFailed ? `The AI check did not work for ${aiFailed} of ${subs.length} (${T.lastAiError || "no answer"}); LanguageTool and Harper were used instead. ` : "")
+      + (ltFailed ? `Done. LanguageTool was not available for ${ltFailed} of ${subs.length}; Harper, the course rules and the vocabulary check worked.` : `Done: ${subs.length} texts checked. Students can see the feedback now.`), 9000);
   });
+}
+
+// One student's answers to one exercise. Grammar: AI if the teacher has set a key (Grammar checker), otherwise
+// LanguageTool + Harper; the course rules for typical learner mistakes always. Then the unit grammar used and the vocabulary.
+// texts: {itemId: text}. Returns {items: {itemId: feedback}, engine, aiFailed, ltFailed}.
+async function checkTexts(texts, { ex, V, phrases = [], gIds = [] }) {
+  const speaking = !!ex?.transcript;
+  const clean = Object.fromEntries(Object.entries(texts).map(([id, t]) => [id, String(t || "")]).filter(([, t]) => t.trim()));
+  let ai = null, aiFailed = false, ltFailed = false, harperError = false, base = null;
+  if (aiReady()) {
+    const prompts = Object.fromEntries((ex?.items || []).filter((it) => clean[it.id] !== undefined && it.text).map((it) => [it.id, String(it.text).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()]));
+    const task = `${ex?.title || ""}. ${ex?.rubric || ""}${Object.keys(prompts).length ? `\nITEM PROMPTS (for a translation this is the sentence to translate: check that the meaning is kept): ${JSON.stringify(prompts)}` : ""}`;
+    try { ai = await aiCheck(clean, { task, grammar: gIds.map((id) => ({ id, label: STRUCTURES[id].label })), speaking }); }
+    catch (e) { console.warn("AI check", e); aiFailed = true; T.lastAiError = e.message; }
+  }
+  if (!ai) { base = await checkGrammar(clean); ltFailed = !!base.ltError; harperError = !!base.harperError; }
+  const items = {};
+  for (const [id, text] of Object.entries(clean)) {
+    let issues;
+    if (ai) {
+      // the AI first, then the course rules where the AI has marked nothing
+      issues = [...(ai[id]?.issues || [])];
+      for (const e of learnerIssues(text)) if (!issues.some((o) => e.offset < o.offset + o.length && o.offset < e.offset + e.length)) issues.push(e);
+      issues.sort((a, b) => a.offset - b.offset);
+    } else issues = base.issues[id] || [];
+    const vocab = vocabProfile(text, V, phrases);
+    items[id] = {
+      text, issues, grammarError: false, ltError: !ai && ltFailed, harperError, vocab, unitTotal: phrases.length,
+      level: textLevel(vocab.counts), grammar: findGrammar(text, gIds),
+      engine: ai ? "ai" : "languagetool", engineName: ai ? endpoint().name : "",
+      target: ai ? ai[id]?.target || [] : [], comment: ai?.[id]?.comment || "", aiLevel: ai?.[id]?.level || "",
+    };
+  }
+  return { items, engine: ai ? "ai" : "languagetool", aiFailed, ltFailed };
+}
+
+// ================================================================== Grammar checker: settings and a place to try it
+function viewChecker() {
+  const s = aiSettings(), P = PROVIDERS[s.provider] || PROVIDERS.custom, ep = endpoint(s);
+  const head = pageHead("Teaching tools", "Grammar checker", "How the students' writing and speaking are checked when you click “Check the writing now” or “Check the speaking now”.");
+  const units = [...T.units].filter((u) => u.status !== "soon").sort((a, b) => unitNum(a) - unitNum(b));
+  const tu = T.tryUnit && units.some((u) => u.id === T.tryUnit) ? T.tryUnit : (units.find((u) => u.id === T.unitId) || units[units.length - 1])?.id || "";
+  return head + `
+  <div class="box ai-box">
+    <h3 style="margin-top:0">Which checker</h3>
+    <label class="row"><input type="radio" name="ai-on" value="0" ${s.on ? "" : "checked"}> <span><b>LanguageTool and Harper</b> – free, nothing to set up. Find general mistakes (agreement, spelling, articles), but miss many learner mistakes in word use and in the unit grammar.</span></label>
+    <label class="row"><input type="radio" name="ai-on" value="1" ${s.on ? "checked" : ""}> <span><b>AI with your own free key</b> (Groq) – finds mistakes much better, explains them, says which structures of the unit grammar are used correctly and writes a short comment for the student.</span></label>
+    <p class="muted" style="font-size:13px">With both checkers the course rules find typical mistakes (<i>I am agree, explain me, suggest to do, discuss about</i>…), and the vocabulary level and the unit phrases are counted on this computer. If the AI does not answer, LanguageTool and Harper are used.</p>
+    <div id="ai-fields" ${s.on ? "" : "hidden"}>
+      <div class="row" style="gap:12px;align-items:flex-end;flex-wrap:wrap">
+        <label>Service <select id="ai-provider">${Object.entries(PROVIDERS).map(([k, p]) => `<option value="${k}" ${k === s.provider ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
+        <label style="flex:1;min-width:240px">API key <input id="ai-key" type="password" autocomplete="off" value="${esc(s.key)}" placeholder="paste your key here"></label>
+        <label>Model <input id="ai-model" list="ai-models" value="${esc(s.model || P.model)}" style="width:16em"><datalist id="ai-models"></datalist></label>
+        ${s.provider === "custom" ? `<label style="min-width:260px">Address (base URL) <input id="ai-base" value="${esc(s.base)}" placeholder="https://…/v1"></label>` : ""}
+      </div>
+      <p class="muted" style="font-size:13px;margin:8px 0">${esc(P.note)}${P.keys ? ` Get a key: <a href="${esc(P.keys)}" target="_blank" rel="noopener">${esc(P.keys.replace(/^https:\/\//, ""))}</a>.` : ""}
+        The key is kept <b>only in this browser</b> (not in the course database, not on GitHub): students never see it. The students' texts (without names) are sent to ${esc(ep.name)} for the check.</p>
+      <div class="row"><button class="btn small" data-act="ai-test">Test the key</button> <button class="btn small" data-act="ai-models">Show the models</button> <span id="ai-status" class="muted">${aiReady(s) ? `Ready: ${esc(ep.name)} · ${esc(ep.model)}` : s.key ? "" : "Paste a key to switch the AI check on."}</span></div>
+    </div>
+  </div>
+  <div class="box ai-box">
+    <h3 style="margin-top:0">Try it</h3>
+    <div class="row" style="gap:12px;align-items:flex-end">
+      <label>Unit <select id="try-unit">${units.map((u) => `<option value="${esc(u.id)}" ${u.id === tu ? "selected" : ""}>${esc(`Unit ${unitNum(u)} · ${u.title}`)}</option>`).join("")}</select></label>
+      <label>Answer <select id="try-kind"><option value="w">written</option><option value="s" ${T.tryKind === "s" ? "selected" : ""}>spoken (a transcript)</option></select></label>
+    </div>
+    <textarea id="try-text" placeholder="Type or paste a student's answer…">${esc(T.tryText || "")}</textarea>
+    <div class="row"><button class="btn primary small" data-act="try-check">Check</button><span id="try-status" class="muted"></span></div>
+    <div id="try-out">${T.tryOut || ""}</div>
+  </div>`;
+}
+function readAiForm() {
+  const s = aiSettings();
+  const on = document.querySelector('input[name="ai-on"]:checked')?.value === "1";
+  const provider = $("#ai-provider")?.value || s.provider;
+  const changed = provider !== s.provider;
+  return { ...s, on, provider, key: ($("#ai-key")?.value ?? s.key).trim(), model: changed ? "" : ($("#ai-model")?.value ?? s.model).trim(), base: ($("#ai-base")?.value ?? s.base).trim() };
+}
+document.addEventListener("change", (e) => {
+  if (e.target.closest?.(".ai-box") && /^(ai-|try-unit|try-kind)/.test(e.target.id || e.target.name || "")) {
+    if (e.target.id === "try-unit") T.tryUnit = e.target.value;
+    if (e.target.id === "try-kind") T.tryKind = e.target.value;
+    if (/^ai-/.test(e.target.id || e.target.name)) saveAiSettings(readAiForm());
+    T.tryText = $("#try-text")?.value || T.tryText;
+    render(true);
+  }
+});
+async function aiButton(act) {
+  const s = readAiForm(); saveAiSettings(s);
+  const st = $("#ai-status");
+  if (!s.key) { if (st) st.textContent = "Paste the key first."; return; }
+  if (st) st.textContent = "Asking…";
+  try {
+    if (act === "ai-test") { await testAi(s); if (st) st.innerHTML = `<b style="color:var(--ok)">✓ The key works.</b> ${esc(endpoint(s).name)} · ${esc(endpoint(s).model)}`; }
+    else {
+      const list = await listModels(s);
+      const dl = $("#ai-models"); if (dl) dl.innerHTML = list.map((m) => `<option value="${esc(m)}">`).join("");
+      if (st) st.textContent = `${list.length} models: click the Model field to choose one.`;
+    }
+  } catch (e) { if (st) st.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`; }
+}
+async function tryCheck() {
+  const text = $("#try-text")?.value || "";
+  T.tryText = text;
+  const st = $("#try-status");
+  if (!text.trim()) { if (st) st.textContent = "Type a text first."; return; }
+  if (st) st.textContent = "Checking…";
+  const unitId = $("#try-unit")?.value || "";
+  const speaking = $("#try-kind")?.value === "s";
+  try {
+    const V = await loadVocab();
+    const { content } = unitId ? await loadUnitData(unitId) : { content: null };
+    const res = await checkTexts({ 1: text }, { ex: { transcript: speaking, title: "Practice", items: [{ id: "1" }] }, V, phrases: unitVocabulary(content), gIds: expandGrammar(unitGrammar(content, null)) });
+    T.tryOut = (res.aiFailed ? `<p class="bad-n">The AI check did not work (${esc(T.lastAiError || "")}); LanguageTool and Harper were used.</p>` : "") + feedbackHTML(res.items[1], { teacher: true });
+    const out = $("#try-out"); if (out) out.innerHTML = T.tryOut;
+    if (st) st.textContent = res.engine === "ai" ? `Checked by ${endpoint().name}` : "Checked by LanguageTool and Harper";
+  } catch (e) { if (st) st.textContent = "Error: " + (e.message || e); }
 }
 
 function accessBar(u, g) {
@@ -1016,6 +1141,9 @@ document.addEventListener("click", (e) => {
     "release": () => releaseUnit(T.gid, u),
     "check-ex": () => checkExercise(T.gid, u, b.dataset.ex),
     "check-writing": () => checkWriting(T.gid, u, b.dataset.ex),
+    "ai-test": () => aiButton("ai-test"),
+    "ai-models": () => aiButton("ai-models"),
+    "try-check": () => tryCheck(),
     "prog-reload": () => { T.prog = null; T.progOpt.open = null; render(true); },
     "prog-csv": () => progressCSV(b.dataset.skill),
     "prog-open": () => { T.progOpt.open = { uid: b.dataset.uid, key: b.dataset.key }; render(true); setTimeout(() => $("#prog-detail")?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 30); },
@@ -1170,7 +1298,7 @@ function studentDetail(uid, data) {
       factor: f[ex.id],
       manual: r?.manual?.[ex.id],
       grading: isManual(ex),
-      itemExtra: T.exr?.[uid]?.feedback?.[ex.id] ? (itemId) => feedbackHTML(T.exr[uid].feedback[ex.id][itemId], { checkedAt: fmtTime(T.exr[uid].feedbackAt?.[ex.id]) }) : null,
+      itemExtra: T.exr?.[uid]?.feedback?.[ex.id] ? (itemId) => feedbackHTML(T.exr[uid].feedback[ex.id][itemId], { checkedAt: fmtTime(T.exr[uid].feedbackAt?.[ex.id]), teacher: true }) : null,
     })).join("");
   }).join("");
   // switching between students without going back to the table
@@ -1651,7 +1779,7 @@ async function releaseTest(key) {
       for (const ex of c.exercises || []) {
         if (!isAuto(ex)) continue;
         const gr = gradeExercise(ex, a.answers?.[ex.id], t.keys[ex.id]);
-        if (!T.showCorrect) for (const it of Object.values(gr.items)) delete it.correct;
+        gr.items = studentItems(ex, gr.items, T.showCorrect);
         items[ex.id] = gr.items; score += gr.score; max += gr.max;
       }
       batch.set(doc(db, "testResults", `${key}__${a.uid}`), { uid: a.uid, groupId: T.gid, testKey: key, items, score, max, gradedAt: serverTimestamp() });
